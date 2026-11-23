@@ -2,7 +2,7 @@
 
 [简体中文使用指南](README.zh-CN.md) · [Chinese case study](CASE-STUDY.zh-CN.md) · [Releases](https://github.com/lilinping/codex-latency-doctor/releases)
 
-Diagnose long pauses in Codex with local evidence. Check context compaction, model retries, tool timing, and HTTPS reachability. Compare chats and measure changes between two audit periods. On macOS, match sleep and wake events with model connection errors. This independent project uses the MIT license.
+Diagnose long pauses in Codex with local evidence. Check context compaction, model retries, tool timing, and HTTPS reachability. Preview and apply targeted configuration changes, then verify, compare, or roll them back. On macOS, match sleep and wake events with model connection errors. This independent project uses the MIT license.
 
 ## Install
 
@@ -13,7 +13,7 @@ Requires Python 3.11+ on Windows 10/11, macOS, or Linux. Check `py -3 --version`
 In a Codex chat, ask the built-in skill installer to install the pinned version.
 
 ```text
-$skill-installer Install https://github.com/lilinping/codex-latency-doctor/tree/v0.4.0/skills/codex-latency-doctor
+$skill-installer Install https://github.com/lilinping/codex-latency-doctor/tree/v0.5.0/skills/codex-latency-doctor
 ```
 
 Open a new chat and invoke the installed skill.
@@ -24,7 +24,7 @@ $codex-latency-doctor Investigate long pauses over the last 24 hours. Use read-o
 
 The skill bundles the CLI and uses your installed Python with no runtime dependencies. If the skill is missing from the picker, restart Codex after active tasks finish.
 
-To upgrade from v0.3.0, move the `codex-latency-doctor` folder out of the Codex home's `skills` directory. You can keep it as `codex-latency-doctor-v0.3.0-backup` directly under the Codex home. Then install v0.4.0 with the command above and open a new chat. The default Codex home is `.codex` under your user home, unless `CODEX_HOME` points elsewhere.
+To upgrade from v0.4.0, move the `codex-latency-doctor` folder out of the Codex home's `skills` directory. You can keep it as `codex-latency-doctor-v0.4.0-backup` directly under the Codex home. Then install v0.5.0 with the command above and open a new chat. The default Codex home is `.codex` under your user home, unless `CODEX_HOME` points elsewhere.
 
 ### Install the CLI in Windows PowerShell
 
@@ -35,7 +35,7 @@ For Codex running inside WSL, follow the Linux steps inside that WSL distributio
 ```powershell
 py -3 -m venv .venv
 $doctorPython = '.\.venv\Scripts\python.exe'
-& $doctorPython -m pip install 'https://github.com/lilinping/codex-latency-doctor/releases/download/v0.4.0/codex_latency_doctor-0.4.0-py3-none-any.whl'
+& $doctorPython -m pip install 'https://github.com/lilinping/codex-latency-doctor/releases/download/v0.5.0/codex_latency_doctor-0.5.0-py3-none-any.whl'
 & $doctorPython -m codex_latency_doctor --version
 & $doctorPython -m codex_latency_doctor audit --hours 24
 ```
@@ -47,7 +47,7 @@ Calling the virtual environment's Python executable directly avoids activating t
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install 'https://github.com/lilinping/codex-latency-doctor/releases/download/v0.4.0/codex_latency_doctor-0.4.0-py3-none-any.whl'
+python -m pip install 'https://github.com/lilinping/codex-latency-doctor/releases/download/v0.5.0/codex_latency_doctor-0.5.0-py3-none-any.whl'
 codex-latency-doctor --version
 codex-latency-doctor audit --hours 24
 ```
@@ -152,19 +152,56 @@ Paired header waits >= 30s                          1            0           -1 
 
 ## Change, verify, and roll back
 
-Close the settings editor and other config writers before applying a change. `apply` backs up the current `config.toml` to `latency-doctor-backups/` and replaces the file atomically. Pick a context threshold based on recorded compaction and the effective model window. The 120,000 value below is from the case study. The separate `--prevent-idle-sleep` option is for macOS idle sleep. macOS handles lid closure separately.
+Choose one setting based on the evidence, then save the baseline from the section above. Use the same Codex home, CLI or desktop installation, and effective model for the follow-up. A reasoning level selected in the chat or passed as a Codex CLI override can take precedence over the default in `config.toml`.
+
+| Evidence | Change to try | Follow-up check |
+| --- | --- | --- |
+| Frequent costly automatic compactions in comparable chats | `--compact-tokens 120000`. Choose a threshold based on the effective model window and observed context load. The case study confirmed adoption of 120,000. The effect on long-task duration remains unmeasured in a controlled comparison. | Confirm the observed runtime threshold, then compare compaction counts, durations, and task quality. |
+| Repeated comparable requests show a long wait, with room to lower reasoning effort | `--reasoning-effort medium` or another level supported by the model. The tool accepts `low`, `medium`, and `high`. | Repeat the same task and check both timing and answer quality. Lowering effort produced mixed timing results in the case study. |
+| Startup logs repeatedly identify one MCP server that the workload can run without | `--disable-mcp NAME`. Use the exact name of an existing `[mcp_servers.NAME]` table. The tool accepts letters A–Z, digits, hyphens and underscores in the name. Use `--enable-mcp NAME` to re-enable the server after fixing it. | Check the corresponding startup error and test workflows that depend on the server. An error disappearing confirms that change alone. |
+| macOS idle sleep coincides with active work and connection loss | `--prevent-idle-sleep`. The lid can still trigger sleep. | Reopen the desktop app, then check `power.codex_idle_sleep_assertion` in `audit` during an active task and review sleep events afterward. |
+
+If HTTPS probe results are inconclusive, check actual model requests and streaming stability before changing the proxy. The options above edit Codex settings only.
+
+Close other config writers before applying the change. Preview with `apply --dry-run`. A proposed change shows `status: planned` and the settings to change. The preview leaves the file untouched and creates no backup. Run the same command without `--dry-run` to back up the current configuration under `latency-doctor-backups/` and atomically update `config.toml`. When the result is `status: applied`, keep the returned `backup_id`. If the selected settings already have the requested values, the command reports `status: unchanged`.
+
+**Windows PowerShell**
 
 ```powershell
+& $doctorPython -m codex_latency_doctor apply --dry-run --compact-tokens 120000
 & $doctorPython -m codex_latency_doctor apply --compact-tokens 120000
 & $doctorPython -m codex_latency_doctor verify
 ```
 
+**macOS and Linux**
+
 ```sh
+codex-latency-doctor apply --dry-run --compact-tokens 120000
 codex-latency-doctor apply --compact-tokens 120000
 codex-latency-doctor verify
 ```
 
-Keep the printed `backup_id`. `verify` checks startup with the Codex CLI on `PATH` using the selected config directory. After active tasks finish, reopen the desktop app and audit a new run to confirm that the runtime adopted the change. To restore the backup, run `rollback BACKUP_ID` with the saved ID. If the configuration changed since `apply`, rollback preserves the current file and you can merge the changes manually.
+With the skill installed, you can request the same action in a Codex chat.
+
+```text
+$codex-latency-doctor Preview and apply only the automatic compaction threshold of 120000 in the current Codex home. Verify it and give me the backup ID.
+```
+
+`verify` runs a strict startup check in a new process with the Codex CLI on `PATH`. After active tasks finish, reopen the desktop app if you use it, repeat the representative workload, and confirm the setting took effect. Use `compare` to check the before and after reports.
+
+If verification fails or the change hurts the workload, replace `BACKUP_ID` below with the value from `apply`. Rollback refuses to overwrite the current file if it has changed since that backup. Review both versions locally and merge the intended change in that case.
+
+```powershell
+& $doctorPython -m codex_latency_doctor rollback BACKUP_ID
+& $doctorPython -m codex_latency_doctor verify
+```
+
+```sh
+codex-latency-doctor rollback BACKUP_ID
+codex-latency-doctor verify
+```
+
+After restoring, reopen the desktop app when active tasks finish and check the affected workflow again.
 
 ## Troubleshooting
 

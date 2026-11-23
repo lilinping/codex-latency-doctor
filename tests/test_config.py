@@ -86,6 +86,64 @@ class ConfigTests(unittest.TestCase):
         change_config(self.home, compact_tokens=None, prevent_idle_sleep=True)
         self.assertIs(inspect_config(self.home)["prevent_idle_sleep"], True)
 
+    def test_preview_and_apply_change_only_the_selected_settings(self):
+        original = (
+            b'# Global settings\r\nmodel_reasoning_effort = "high" # keep comment\r\n'
+            b'[mcp_servers."example-prod"] # keep header\r\ncommand = "example"\r\n'
+            b'[mcp_servers."example-prod".env]\r\nTOKEN = "private-placeholder"\r\n'
+            b'[mcp_servers.other]\r\ncommand = "other"\r\nenabled = false\r\n'
+        )
+        self.path.write_bytes(original)
+        settings = {"reasoning_effort": "medium", "mcp_name": "example-prod", "mcp_enabled": False}
+        changes = {
+            "model_reasoning_effort": {"before": "high", "after": "medium"},
+            "mcp_servers.example-prod.enabled": {"before": True, "after": False},
+        }
+        preview = change_config(self.home, **settings, dry_run=True)
+        self.assertEqual(preview, {"status": "planned", "changes": changes})
+        self.assertEqual(self.path.read_bytes(), original)
+        self.assertEqual(list(self.home.iterdir()), [self.path])
+
+        applied = change_config(self.home, **settings)
+        self.assertEqual(applied["status"], "applied")
+        self.assertEqual(applied["changes"], changes)
+        expected = original.replace(b'"high"', b'"medium"').replace(
+            b'command = "example"', b'enabled = false\r\ncommand = "example"',
+        )
+        self.assertEqual(self.path.read_bytes(), expected)
+        self.assertEqual(restore_config(self.home, applied["backup_id"])["status"], "restored")
+        self.assertEqual(self.path.read_bytes(), original)
+
+    def test_enable_paused_mcp_and_skip_an_unchanged_setting(self):
+        original = b"[mcp_servers.example]\nenabled = false # keep comment\n"
+        self.path.write_bytes(original)
+        unchanged = change_config(self.home, mcp_name="example", mcp_enabled=False)
+        self.assertEqual(unchanged, {"status": "unchanged"})
+        self.assertFalse((self.home / BACKUPS).exists())
+
+        enabled = change_config(self.home, mcp_name="example", mcp_enabled=True)
+        self.assertEqual(enabled["changes"], {"mcp_servers.example.enabled": {"before": False, "after": True}})
+        self.assertEqual(self.path.read_bytes(), original.replace(b"false", b"true"))
+        self.assertEqual(change_config(self.home, mcp_name="example", mcp_enabled=True), {"status": "unchanged"})
+        self.assertEqual(len(list((self.home / BACKUPS).glob("backup-*"))), 1)
+
+    def test_refuse_invalid_or_unsupported_changes_without_writing(self):
+        original = b'mcp_servers = { example = { command = "example" } }\n'
+        self.path.write_bytes(original)
+        cases = (
+            {"mcp_name": "example", "mcp_enabled": False, "reasoning_effort": "medium"},
+            {"mcp_name": "missing", "mcp_enabled": False},
+            {"mcp_name": "example.env", "mcp_enabled": False},
+            {"mcp_name": "example"},
+            {"reasoning_effort": "unknown"},
+        )
+        for settings in cases:
+            with self.subTest(**settings):
+                with self.assertRaises(ConfigError):
+                    change_config(self.home, **settings)
+                self.assertEqual(self.path.read_bytes(), original)
+                self.assertFalse((self.home / BACKUPS).exists())
+
     def test_reject_inline_table_and_invalid_toml(self):
         for old in ("desktop = { preventSleepWhileRunning = false }\n", "[desktop"):
             self.path.write_text(old)

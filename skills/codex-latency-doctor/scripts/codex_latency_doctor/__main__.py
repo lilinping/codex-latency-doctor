@@ -9,7 +9,7 @@ from pathlib import Path
 from . import __version__
 from .checks import probe_network, verify_native
 from .comparison import METRICS, ComparisonError, compare_audits
-from .config import ConfigError, change_config, inspect_config, restore_config
+from .config import REASONING_EFFORTS, ConfigError, change_config, inspect_config, restore_config
 from .diagnostics import collect_diagnostics, collect_tasks
 
 
@@ -53,9 +53,14 @@ def _arguments(argv: list[str] | None) -> argparse.Namespace:
     network.add_argument("--compare-direct", action="store_true", help="Also probe with curl's proxy bypassed.")
 
     commands.add_parser("verify", help="Check startup with the native Codex CLI on PATH.")
-    apply = commands.add_parser("apply", help="Back up config.toml and apply selected settings.")
-    apply.add_argument("--compact-tokens", type=_bounded(1, 2**31 - 1))
+    apply = commands.add_parser("apply", help="Preview or back up and apply selected settings.")
+    apply.add_argument("--dry-run", action="store_true", help="Show the changes without writing any files.")
+    apply.add_argument("--compact-tokens", type=_bounded(1, 2**31 - 1), help="Set the automatic compaction threshold.")
+    apply.add_argument("--reasoning-effort", choices=REASONING_EFFORTS, help="Set the default model reasoning effort.")
     apply.add_argument("--prevent-idle-sleep", action="store_true", help="Enable the macOS desktop idle sleep setting.")
+    mcp = apply.add_mutually_exclusive_group()
+    mcp.add_argument("--disable-mcp", metavar="NAME", help="Disable an existing MCP registration.")
+    mcp.add_argument("--enable-mcp", metavar="NAME", help="Re-enable an existing MCP registration.")
     restore = commands.add_parser("rollback", help="Restore an unchanged applied configuration from its backup.")
     restore.add_argument("backup_id")
     return parser.parse_args(argv)
@@ -162,7 +167,16 @@ def main(argv: list[str] | None = None) -> int:
             case "apply":
                 if args.prevent_idle_sleep and sys.platform != "darwin":
                     raise ConfigError("--prevent-idle-sleep is supported on macOS only.")
-                result = change_config(codex_home, compact_tokens=args.compact_tokens, prevent_idle_sleep=args.prevent_idle_sleep)
+                mcp_name = args.disable_mcp if args.disable_mcp is not None else args.enable_mcp
+                result = change_config(
+                    codex_home,
+                    compact_tokens=args.compact_tokens,
+                    prevent_idle_sleep=args.prevent_idle_sleep,
+                    dry_run=args.dry_run,
+                    reasoning_effort=args.reasoning_effort,
+                    mcp_name=mcp_name,
+                    mcp_enabled=None if mcp_name is None else args.enable_mcp is not None,
+                )
             case "rollback":
                 result = restore_config(codex_home, args.backup_id)
     except (ConfigError, ComparisonError) as error:

@@ -61,10 +61,24 @@ jobs:
           $skillVersion = python -E -S -B $launcher --version
           if ($skillVersion -ne (codex-latency-doctor --version)) { throw 'Version mismatch' }
           $config = Join-Path $homePath 'config.toml'
-          'model_auto_compact_token_limit = 80000' | Set-Content -Encoding utf8 $config
+          @(
+            'model_auto_compact_token_limit = 80000'
+            'model_reasoning_effort = "medium"'
+            '[mcp_servers.example]'
+            'command = "node"'
+          ) | Set-Content -Encoding utf8 $config
+          $originalHash = (Get-FileHash $config).Hash
           python -E -S -B $launcher --codex-home $homePath --json audit --hours 1 |
             Set-Content -Encoding utf8BOM before.json
-          $apply = python -E -S -B $launcher --codex-home $homePath --json apply --compact-tokens 120000 |
+          $changes = @('--compact-tokens', '120000', '--reasoning-effort', 'low', '--disable-mcp', 'example')
+          $preview = python -E -S -B $launcher --codex-home $homePath --json apply --dry-run @changes |
+            ConvertFrom-Json
+          if ($preview.status -ne 'planned' -or
+              $preview.changes.model_reasoning_effort.after -ne 'low' -or
+              $preview.changes.'mcp_servers.example.enabled'.after -ne $false -or
+              (Test-Path (Join-Path $homePath 'latency-doctor-backups')) -or
+              (Get-FileHash $config).Hash -ne $originalHash) { throw 'Unexpected config preview' }
+          $apply = python -E -S -B $launcher --codex-home $homePath --json apply @changes |
             ConvertFrom-Json
           python -E -S -B $launcher --codex-home $homePath --json audit --hours 1 |
             Set-Content -Encoding Unicode after.json
@@ -78,7 +92,18 @@ jobs:
           npm.cmd install --global --prefix $prefix --no-audit --no-fund @openai/codex@0.171.0
           $env:Path = "$prefix;$env:Path"
           codex-latency-doctor --codex-home $homePath verify
+          $env:CODEX_HOME = $homePath
+          $registered = & (Join-Path $prefix 'codex.cmd') mcp list --json | ConvertFrom-Json
+          if ($registered.name -ne 'example' -or $registered.enabled -ne $false) {
+            throw 'Native Codex did not load the disabled MCP registration'
+          }
+          $enable = codex-latency-doctor --codex-home $homePath --json apply --enable-mcp example | ConvertFrom-Json
+          $registered = & (Join-Path $prefix 'codex.cmd') mcp list --json | ConvertFrom-Json
+          if ($registered.name -ne 'example' -or $registered.enabled -ne $true) {
+            throw 'Native Codex did not load the re-enabled MCP registration'
+          }
+          codex-latency-doctor --codex-home $homePath rollback $enable.backup_id
           codex-latency-doctor --codex-home $homePath rollback $apply.backup_id
-          if ((Get-Content $config) -ne 'model_auto_compact_token_limit = 80000') {
+          if ((Get-FileHash $config).Hash -ne $originalHash) {
             throw 'Rollback did not restore the original config'
           }

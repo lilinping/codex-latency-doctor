@@ -2,6 +2,7 @@
 
 import errno
 import hashlib
+import json
 import os
 import re
 import stat
@@ -23,9 +24,13 @@ if os.name == "nt":
 
 COMPACT = "model_auto_compact_token_limit"
 SLEEP = "preventSleepWhileRunning"
+REASONING = "model_reasoning_effort"
+REASONING_EFFORTS = ("low", "medium", "high")
+KNOWN_REASONING_EFFORTS = ("none", "minimal", *REASONING_EFFORTS, "xhigh", "max", "ultra")
 EXTERNAL_IMPORT = "external-agent-import-sync-enabled"
 BACKUPS = "latency-doctor-backups"
 ID_PATTERN = re.compile(r"backup-[a-z0-9_]{8}")
+MCP_NAME_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
 HEADER = re.compile(r"(?m)^[ \t]*\[")
 
 
@@ -120,9 +125,7 @@ def inspect_config(codex_home: Path) -> dict:
         "custom_provider_count": len(providers),
         "selected_custom_provider": isinstance(provider, str) and provider in providers,
         "reasoning_effort": (
-            config.get("model_reasoning_effort")
-            if config.get("model_reasoning_effort") in ("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
-            else None
+            config.get(REASONING) if config.get(REASONING) in KNOWN_REASONING_EFFORTS else None
         ),
         "missing_trusted_project_paths": _stale_trusts(_table(config, "projects")),
     }
@@ -138,39 +141,72 @@ def _set_scalar(section: str, key: str, literal: str, existing: bool, newline: s
     return f"{key} = {literal}{newline}" + section
 
 
-def _edited(original: bytes, compact_tokens: int | None, prevent_idle_sleep: bool) -> bytes:
+def _set_table_scalar(text: str, table: str, key: str, literal: str, existing: bool, newline: str) -> str:
+    headings = list(re.finditer(rf"(?m)^[ \t]*\[{table}\][ \t]*(?:#[^\r\n]*)?(?:\r?\n|$)", text))
+    if len(headings) != 1:
+        raise ConfigError("Could not locate a unique supported TOML table for this setting. Edit it manually, then run audit.")
+    start = headings[0].end()
+    following_header = HEADER.search(text, start)
+    end = following_header.start() if following_header else len(text)
+    prefix = text[:start]
+    if not prefix.endswith("\n"):
+        prefix += newline
+    return prefix + _set_scalar(text[start:end], key, literal, existing, newline) + text[end:]
+
+
+def _edited(
+    original: bytes,
+    compact_tokens: int | None,
+    prevent_idle_sleep: bool,
+    reasoning_effort: str | None,
+    mcp_name: str | None,
+    mcp_enabled: bool | None,
+) -> tuple[bytes, dict]:
     expected = _parse(original)
     text = original.decode("utf-8")
     newline = "\r\n" if "\r\n" in text else "\n"
+    changes = {}
     current_limit = expected.get(COMPACT)
-    if compact_tokens is not None and (type(current_limit) is not int or current_limit != compact_tokens):
-        heading = HEADER.search(text)
-        end = heading.start() if heading else len(text)
-        text = _set_scalar(text[:end], COMPACT, str(compact_tokens), COMPACT in expected, newline) + text[end:]
-        expected[COMPACT] = compact_tokens
+    current_effort = expected.get(REASONING)
+    for key, before, after in (
+        (COMPACT, current_limit if type(current_limit) is int else None, compact_tokens),
+        (REASONING, current_effort if current_effort in KNOWN_REASONING_EFFORTS else None, reasoning_effort),
+    ):
+        if after is not None and before != after:
+            heading = HEADER.search(text)
+            end = heading.start() if heading else len(text)
+            text = _set_scalar(text[:end], key, json.dumps(after), key in expected, newline) + text[end:]
+            expected[key] = after
+            changes[key] = {"before": before, "after": after}
 
-    if prevent_idle_sleep and _table(expected, "desktop").get(SLEEP) is not True:
-        headings = list(re.finditer(r"(?m)^[ \t]*\[desktop\][ \t]*(?:#[^\r\n]*)?(?:\r?\n|$)", text))
-        if len(headings) > 1:
-            raise ConfigError("Could not locate a unique desktop section.")
-        if headings:
-            start = headings[0].end()
-            following_header = HEADER.search(text, start)
-            end = following_header.start() if following_header else len(text)
-            prefix = text[:start]
-            if not prefix.endswith("\n"):
-                prefix += newline
-            text = prefix + _set_scalar(text[start:end], SLEEP, "true", SLEEP in _table(expected, "desktop"), newline) + text[end:]
-        elif "desktop" not in expected:
+    desktop = _table(expected, "desktop")
+    sleep_before = desktop.get(SLEEP)
+    if prevent_idle_sleep and sleep_before is not True:
+        if "desktop" not in expected:
             text += (newline if text.endswith("\n") else newline * 2) + f"[desktop]{newline}{SLEEP} = true{newline}"
         else:
-            raise ConfigError("The desktop section uses an unsupported TOML layout. Edit it manually, then run audit.")
+            text = _set_table_scalar(text, "desktop", SLEEP, "true", SLEEP in desktop, newline)
         expected.setdefault("desktop", {})[SLEEP] = True
+        changes[f"desktop.{SLEEP}"] = {"before": sleep_before if type(sleep_before) is bool else None, "after": True}
+
+    if mcp_name is not None:
+        server = _table(expected, "mcp_servers").get(mcp_name)
+        if not isinstance(server, dict):
+            raise ConfigError("Expected an existing MCP server in config.toml.")
+        before = server.get("enabled", True)
+        if before is not mcp_enabled:
+            name = re.escape(mcp_name)
+            table = rf"""[ \t]*mcp_servers[ \t]*\.[ \t]*(?:{name}|"{name}"|'{name}')[ \t]*"""
+            text = _set_table_scalar(text, table, "enabled", json.dumps(mcp_enabled), "enabled" in server, newline)
+            server["enabled"] = mcp_enabled
+            changes[f"mcp_servers.{mcp_name}.enabled"] = {
+                "before": before if type(before) is bool else None, "after": mcp_enabled,
+            }
 
     result = text.encode("utf-8")
     if _parse(result) != expected:
         raise ConfigError("The proposed edit changed additional TOML values. Configuration left unchanged.")
-    return result
+    return result, changes
 
 
 def _write_private(path: Path, content: bytes) -> None:
@@ -373,16 +409,32 @@ def _digest(content: bytes) -> bytes:
     return hashlib.sha256(content).hexdigest().encode("ascii")
 
 
-def change_config(codex_home: Path, *, compact_tokens: int | None, prevent_idle_sleep: bool) -> dict:
+def change_config(
+    codex_home: Path,
+    *,
+    compact_tokens: int | None = None,
+    prevent_idle_sleep: bool = False,
+    dry_run: bool = False,
+    reasoning_effort: str | None = None,
+    mcp_name: str | None = None,
+    mcp_enabled: bool | None = None,
+) -> dict:
     if compact_tokens is not None and (type(compact_tokens) is not int or not 1 <= compact_tokens <= 2**31 - 1):
         raise ConfigError("The compact token threshold must be a positive integer up to 2147483647.")
-    if compact_tokens is None and not prevent_idle_sleep:
+    if reasoning_effort is not None and reasoning_effort not in REASONING_EFFORTS:
+        raise ConfigError("Select low, medium, or high for the reasoning effort.")
+    if mcp_name is not None or mcp_enabled is not None:
+        if not isinstance(mcp_name, str) or not MCP_NAME_PATTERN.fullmatch(mcp_name) or type(mcp_enabled) is not bool:
+            raise ConfigError("Select an MCP server name with ASCII letters, digits, hyphens, or underscores.")
+    if compact_tokens is None and not prevent_idle_sleep and reasoning_effort is None and mcp_name is None:
         raise ConfigError("Select at least one setting to change.")
     path = codex_home / "config.toml"
     original = _read(path)
-    updated = _edited(original, compact_tokens, prevent_idle_sleep)
+    updated, changes = _edited(original, compact_tokens, prevent_idle_sleep, reasoning_effort, mcp_name, mcp_enabled)
     if original == updated:
         return {"status": "unchanged"}
+    if dry_run:
+        return {"status": "planned", "changes": changes}
     with _locked(codex_home, create=True) as backups:
         if _read(path) != original:
             raise ConfigError("Configuration changed during the operation. Configuration left unchanged.")
@@ -393,7 +445,7 @@ def change_config(codex_home: Path, *, compact_tokens: int | None, prevent_idle_
         _write_private(backup / "config.toml", original)
         _write_private(backup / "applied.sha256", _digest(updated))
         _replace(path, original, updated)
-    return {"status": "applied", "backup_id": backup.name, "desktop_reload_needed": True}
+    return {"status": "applied", "backup_id": backup.name, "desktop_reload_needed": True, "changes": changes}
 
 
 def restore_config(codex_home: Path, backup_id: str) -> dict:

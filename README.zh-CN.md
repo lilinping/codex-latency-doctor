@@ -1,6 +1,6 @@
 # Codex Latency Doctor 中文指南
 
-Codex 长时间没有可见进度时，用这个本地工具查看上下文压缩、模型请求重试、工具耗时和 HTTPS 连通性。macOS 还可以检查睡眠和唤醒事件。项目采用 MIT 许可证。
+Codex 长时间没有可见进度时，用这个本地工具查看上下文压缩、模型请求重试、工具耗时和 HTTPS 连通性。你可以预览并应用有依据的配置修改，然后验证、对比或回滚。macOS 还可以检查睡眠和唤醒事件。项目采用 MIT 许可证。
 
 [English README](README.md) · [真实排查案例](CASE-STUDY.zh-CN.md) · [发布版本](https://github.com/lilinping/codex-latency-doctor/releases)
 
@@ -18,7 +18,7 @@ Codex 长时间没有可见进度时，用这个本地工具查看上下文压�
 在 Codex 聊天中发送：
 
 ```text
-$skill-installer 请从 https://github.com/lilinping/codex-latency-doctor/tree/v0.4.0/skills/codex-latency-doctor 安装技能
+$skill-installer 请从 https://github.com/lilinping/codex-latency-doctor/tree/v0.5.0/skills/codex-latency-doctor 安装技能
 ```
 
 安装后新建聊天并运行：
@@ -29,7 +29,7 @@ $codex-latency-doctor 只读排查最近 24 小时的卡顿，给出日志覆盖
 
 技能已包含诊断程序。安装后使用现有的 Python 运行本地检查，无需 pip。技能列表还未显示此技能时，等活动任务结束后重启 Codex。
 
-如果已安装 v0.3.0，从 Codex 目录下的 `skills` 中把 `codex-latency-doctor` 目录移到扫描范围之外做备份，例如放到 Codex 目录下的 `codex-latency-doctor-v0.3.0-backup`。然后用上面的指令安装 v0.4.0 并新建聊天。默认 Codex 目录是用户主目录下的 `.codex`，自定义位置以 `CODEX_HOME` 为准。
+如果已安装 v0.4.0，从 Codex 目录下的 `skills` 中把 `codex-latency-doctor` 目录移到扫描范围之外做备份，例如放到 Codex 目录下的 `codex-latency-doctor-v0.4.0-backup`。然后用上面的指令安装 v0.5.0 并新建聊天。默认 Codex 目录是用户主目录下的 `.codex`，自定义位置以 `CODEX_HOME` 为准。
 
 ### Windows PowerShell 安装 CLI
 
@@ -40,7 +40,7 @@ $codex-latency-doctor 只读排查最近 24 小时的卡顿，给出日志覆盖
 ```powershell
 py -3 -m venv .venv
 $doctorPython = '.\.venv\Scripts\python.exe'
-& $doctorPython -m pip install 'https://github.com/lilinping/codex-latency-doctor/releases/download/v0.4.0/codex_latency_doctor-0.4.0-py3-none-any.whl'
+& $doctorPython -m pip install 'https://github.com/lilinping/codex-latency-doctor/releases/download/v0.5.0/codex_latency_doctor-0.5.0-py3-none-any.whl'
 & $doctorPython -m codex_latency_doctor --version
 & $doctorPython -m codex_latency_doctor audit --hours 24
 ```
@@ -52,7 +52,7 @@ $doctorPython = '.\.venv\Scripts\python.exe'
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install 'https://github.com/lilinping/codex-latency-doctor/releases/download/v0.4.0/codex_latency_doctor-0.4.0-py3-none-any.whl'
+python -m pip install 'https://github.com/lilinping/codex-latency-doctor/releases/download/v0.5.0/codex_latency_doctor-0.5.0-py3-none-any.whl'
 codex-latency-doctor --version
 codex-latency-doctor audit --hours 24
 ```
@@ -159,19 +159,44 @@ Paired header waits >= 30s                          1            0           -1 
 
 ### 修改、验证和回滚
 
-只有确认需要改配置时才运行 `apply`。先关闭其他配置编辑器。`apply` 写入选定的配置项，并将原文件备份到 Codex 目录下的 `latency-doctor-backups/`。示例阈值 `120000` 来自案例，实际值要结合模型上下文窗口与压缩记录选择。`--prevent-idle-sleep` 仅用于 macOS 的空闲睡眠，合盖睡眠仍由 macOS 处理。
+根据证据选一项修改，先按上一节保存基线。对照时使用同一个 Codex 目录、同一套 CLI 或桌面应用和同一个实际使用的模型。聊天内选择的推理档或 Codex CLI 的 `-c` 覆盖项可能优先于 `config.toml` 的默认值。
+
+| 观察到的证据 | 可以执行的修改 | 修改后怎么确认 |
+| --- | --- | --- |
+| 同类长任务频繁自动压缩，每次压缩有明显等待 | `--compact-tokens 120000`。结合实际模型窗口和上下文用量选择阈值。案例确认了 120,000 生效，长任务能节省多少时间仍缺少受控对照。 | 用新任务的日志确认阈值，再比较压缩次数、耗时和任务完成质量。 |
+| 同类请求反复出现长等待，任务允许降低推理档 | `--reasoning-effort medium`。工具接受 `low`、`medium`、`high`，选择模型支持的档位。 | 重复同样的任务，同时检查耗时和答复质量。案例中进一步调低的收益并不稳定。 |
+| 启动日志反复指向同一个 MCP 服务，且当前工作流允许暂停它 | `--disable-mcp NAME`。把 `NAME` 换成已有 `[mcp_servers.NAME]` 配置表的服务名，支持英文字母、数字、连字符和下划线。修复服务后可用 `--enable-mcp NAME` 恢复。 | 检查对应启动报错，并测试依赖该服务的工作流。报错消失只表明对应的启动问题解除。 |
+| macOS 空闲睡眠与任务中断重合 | `--prevent-idle-sleep`。合盖仍可触发系统睡眠。 | 重新打开桌面应用，在任务运行期间用 `audit` 查看 `power.codex_idle_sleep_assertion`，任务结束后再核对睡眠事件。 |
+
+如果 HTTPS 探测证据不足，先复核真实模型请求和流式稳定性，再决定是否需要调整代理。上表的命令只修改指定的 Codex 设置。
+
+关闭其他会写入配置的程序。先用 `apply --dry-run` 预览，存在改动时输出 `status: planned` 和变更项，整个预览过程保持文件原样且不创建备份。确认后去掉 `--dry-run` 执行，工具会把原配置备份到 Codex 目录下的 `latency-doctor-backups/`，再原子替换 `config.toml`。看到 `status: applied` 后，记下返回的 `backup_id`。如果原配置已经符合要求，工具会返回 `status: unchanged`。
+
+**Windows PowerShell**
 
 ```powershell
+& $doctorPython -m codex_latency_doctor apply --dry-run --compact-tokens 120000
 & $doctorPython -m codex_latency_doctor apply --compact-tokens 120000
 & $doctorPython -m codex_latency_doctor verify
 ```
 
+**macOS 和 Linux**
+
 ```sh
+codex-latency-doctor apply --dry-run --compact-tokens 120000
 codex-latency-doctor apply --compact-tokens 120000
 codex-latency-doctor verify
 ```
 
-记下 `backup_id`。活动任务结束后重新打开桌面应用，运行可比任务并用 `audit` 核对运行时的阈值。需要回滚时，替换下例中的 `BACKUP_ID` 为实际值。若应用改动后配置又被编辑过，回滚会保留当前文件，需要手工合并。
+已安装技能时，也可以在 Codex 聊天中直接指明要修改的设置。
+
+```text
+$codex-latency-doctor 在当前 Codex 目录先预览，再将自动压缩阈值改为 120000。只改这一项，执行校验并告诉我备份 ID。
+```
+
+`verify` 用 `PATH` 上的 Codex CLI 启动新进程执行严格配置检查。使用桌面应用时，等活动任务完成后重新打开应用，重跑相同任务并检查改动是否生效。再用 `compare` 查看两次报告，核对预期指标和任务质量。
+
+校验失败或出现退化时，用 `apply` 返回的实际 ID 替换下面的 `BACKUP_ID`。如果配置在应用改动后又被编辑过，回滚会拒绝覆盖当前文件。此时可在本地对照备份，手工合并要撤销的设置。
 
 ```powershell
 & $doctorPython -m codex_latency_doctor rollback BACKUP_ID
@@ -182,6 +207,8 @@ codex-latency-doctor verify
 codex-latency-doctor rollback BACKUP_ID
 codex-latency-doctor verify
 ```
+
+恢复后，使用桌面应用时等活动任务结束再重新打开，并复查受影响的工作流。
 
 ## 安装和使用遇到问题
 
