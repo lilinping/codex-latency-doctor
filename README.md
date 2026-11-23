@@ -40,7 +40,7 @@ $doctorPython = '.\.venv\Scripts\python.exe'
 & $doctorPython -m codex_latency_doctor audit --hours 24
 ```
 
-Calling the virtual environment's Python executable directly avoids activating the environment or changing the PowerShell execution policy.
+Calling the virtual environment's Python executable directly avoids activating the environment or changing the PowerShell execution policy. In a new PowerShell window, return to the installation directory and set `$doctorPython` again as shown above.
 
 ### Install the CLI on macOS and Linux
 
@@ -75,6 +75,12 @@ codex-latency-doctor network --samples 3 --compare-direct
 ## Compare chats
 
 Use `tasks` to inspect the context evidence by chat and source. `audit` aggregates all chats in the scanned log window.
+
+If you installed the skill, send this in a Codex chat.
+
+```text
+$codex-latency-doctor Compare interactive chats and background tasks over the last 24 hours. Include log coverage, sampled context peaks, compaction thresholds, and automatic compaction requests.
+```
 
 ```powershell
 & $doctorPython -m codex_latency_doctor tasks --hours 24 --scope interactive --limit 10
@@ -123,6 +129,12 @@ codex-latency-doctor compare before.json after.json
 ```
 
 `compare` reads two local `--json audit` files. Use `--json compare before.json after.json` for scripted output. A delta is the current value minus the baseline value. Deltas need compatible windows, complete scans and observations for the metric. For older audits without a capture time, check overlap separately. Each audit aggregates all chats in its window, so minimize unrelated work during both test periods.
+
+With both reports saved, you can send the following in a Codex chat. Include the full paths if the reports are in another directory.
+
+```text
+$codex-latency-doctor Compare before.json and after.json. Check the capture windows, log coverage, and sample counts before explaining which metrics changed.
+```
 
 | What changed | What to check before interpreting it |
 | --- | --- |

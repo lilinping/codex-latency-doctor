@@ -45,7 +45,7 @@ $doctorPython = '.\.venv\Scripts\python.exe'
 & $doctorPython -m codex_latency_doctor audit --hours 24
 ```
 
-直接调用虚拟环境中的 `python.exe` 无需激活虚拟环境，也无需修改 PowerShell 执行策略。
+直接调用虚拟环境中的 `python.exe` 无需激活虚拟环境，也无需修改 PowerShell 执行策略。新开 PowerShell 窗口时，先回到安装目录并重新设置上面的 `$doctorPython`。
 
 ### macOS 和 Linux 安装 CLI
 
@@ -80,6 +80,12 @@ codex-latency-doctor network --samples 3 --compare-direct
 ### 对比不同聊天的上下文
 
 `audit` 汇总所选 Codex 目录中的运行日志。`tasks` 按聊天查看上下文观测值，可以单独查看交互聊天或后台任务。
+
+已安装技能时，可以直接在 Codex 聊天中发送这条指令。
+
+```text
+$codex-latency-doctor 对比最近 24 小时的交互聊天和后台任务。列出各组的日志覆盖、上下文峰值、压缩阈值和自动压缩请求数。
+```
 
 ```powershell
 & $doctorPython -m codex_latency_doctor tasks --hours 24 --scope interactive --limit 10
@@ -128,6 +134,12 @@ codex-latency-doctor compare before.json after.json
 ```
 
 `compare` 读取本地的两份 `--json audit` 报告。自动处理时用 `--json compare before.json after.json`。每份 `audit` 都会汇总窗口内所有聊天，因此测试期间尽量避免混入无关任务。
+
+如果两份报告已保存，也可以在 Codex 聊天中发送下面的指令。文件位于其他目录时，请写出完整路径。
+
+```text
+$codex-latency-doctor 比较 before.json 和 after.json。先核对采集窗口、日志覆盖和样本数，再解释有哪些指标变化。
+```
 
 先看两份报告的时间窗口是否等长、扫描是否截断、采集时间是否相隔足够久。差值是当前值减去基线值。工具只在观测窗口和有效数据允许时计算差值。旧版报告如果缺少采集时间，需要自行核对窗口有无重叠。
 
