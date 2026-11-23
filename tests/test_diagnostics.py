@@ -13,7 +13,7 @@ class LogTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        self.home = Path(temporary.name) / "example?#folder"
+        self.home = Path(temporary.name) / "中文 #folder"
         self.home.mkdir()
         self.database = self.home / "logs_2.sqlite"
 

@@ -1,92 +1,174 @@
 # Codex Latency Doctor
 
-[简体中文使用指南](README.zh-CN.md)
+[简体中文使用指南](README.zh-CN.md) · [Chinese case study](CASE-STUDY.zh-CN.md) · [Releases](https://github.com/lilinping/codex-latency-doctor/releases)
 
-A local CLI for diagnosing long pauses in Codex. Compare configuration with observed context usage, match macOS sleep events with model connection errors, and measure HTTPS reachability. This independent project uses the MIT license.
+Diagnose long pauses in Codex with local evidence. Check context compaction, model retries, tool timing, and HTTPS reachability. Compare chats and measure changes between two audit periods. On macOS, match sleep and wake events with model connection errors. This independent project uses the MIT license.
 
-For the original investigation and what each cleanup achieved, see the [Chinese case study](CASE-STUDY.zh-CN.md).
+## Install
 
-## Install as a Codex skill
+Requires Python 3.11+ on Windows 10/11, macOS, or Linux. Check `py -3 --version` in PowerShell or `python3 --version` on macOS and Linux. If Windows has no `py` launcher, check `python --version` and use `python` in the virtual environment setup below. If you have several versions, you can select one explicitly, for example `py -3.12` or `python3.12`. Open a fresh terminal after installing Python. [Python downloads](https://www.python.org/downloads/)
 
-Ask Codex to install the skill from the pinned release:
+### Install as a Codex skill
 
-```text
-$skill-installer Install https://github.com/lilinping/codex-latency-doctor/tree/v0.3.0/skills/codex-latency-doctor
-```
-
-After installation, open a new Codex chat and run the skill:
+In a Codex chat, ask the built-in skill installer to install the pinned version.
 
 ```text
-$codex-latency-doctor Investigate long pauses in Codex over the last 24 hours.
+$skill-installer Install https://github.com/lilinping/codex-latency-doctor/tree/v0.4.0/skills/codex-latency-doctor
 ```
 
-If the skill is missing from the picker, restart Codex. The installed skill bundles the CLI and uses an existing Python 3.11+ interpreter. It runs local diagnostics without pip or a runtime download.
+Open a new chat and invoke the installed skill.
 
-## Quick start
+```text
+$codex-latency-doctor Investigate long pauses over the last 24 hours. Use read-only checks and report the log coverage.
+```
 
-Requires Python 3.11+ on macOS or Linux. If `python3 --version` is older, use an installed newer interpreter such as `python3.12`. The package has no runtime Python dependencies. Power diagnostics require macOS, `network` uses curl, and `verify` uses Codex on your PATH.
+The skill bundles the CLI and uses your installed Python with no runtime dependencies. If the skill is missing from the picker, restart Codex after active tasks finish.
+
+To upgrade from v0.3.0, move the `codex-latency-doctor` folder out of the Codex home's `skills` directory. You can keep it as `codex-latency-doctor-v0.3.0-backup` directly under the Codex home. Then install v0.4.0 with the command above and open a new chat. The default Codex home is `.codex` under your user home, unless `CODEX_HOME` points elsewhere.
+
+### Install the CLI in Windows PowerShell
+
+Run these commands in a writable directory. Run the later PowerShell examples from the same directory.
+
+For Codex running inside WSL, follow the Linux steps inside that WSL distribution. Use PowerShell for a native Windows Codex installation.
+
+```powershell
+py -3 -m venv .venv
+$doctorPython = '.\.venv\Scripts\python.exe'
+& $doctorPython -m pip install 'https://github.com/lilinping/codex-latency-doctor/releases/download/v0.4.0/codex_latency_doctor-0.4.0-py3-none-any.whl'
+& $doctorPython -m codex_latency_doctor --version
+& $doctorPython -m codex_latency_doctor audit --hours 24
+```
+
+Calling the virtual environment's Python executable directly avoids activating the environment or changing the PowerShell execution policy.
+
+### Install the CLI on macOS and Linux
 
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install 'https://github.com/lilinping/codex-latency-doctor/releases/download/v0.3.0/codex_latency_doctor-0.3.0-py3-none-any.whl'
+python -m pip install 'https://github.com/lilinping/codex-latency-doctor/releases/download/v0.4.0/codex_latency_doctor-0.4.0-py3-none-any.whl'
+codex-latency-doctor --version
 codex-latency-doctor audit --hours 24
-codex-latency-doctor tasks --scope interactive --limit 5
 ```
 
-You can install from a checkout with `python -m pip install .` inside the virtual environment, or run directly from the source directory:
+From a checkout, you can also install with `python -m pip install .` inside an active virtual environment or run the bundled launcher directly, for example `python3 -B skills/codex-latency-doctor/scripts/doctor.py audit --hours 24` on macOS and Linux.
+
+## Diagnose a pause
+
+1. Note roughly when the pause occurred. Run `audit --hours 1` immediately after a recent incident, or choose a window from 1 to 168 hours to cover it. Check the log status, the time of the oldest scanned row and whether the scan was truncated.
+2. Compare configured and observed compaction thresholds, then check compaction requests and duration, model retries and errors, and completed tool timings. Step-to-HTTP-header timing includes local preparation and possible retries through the first successful response headers. Streaming and unpaired requests need separate evidence. On macOS, check whether connection errors occurred near sleep or wake.
+3. If connectivity is in question, run `network --samples 3 --compare-direct`. The default route uses curl's environment and the direct route bypasses curl's proxy. A system VPN can affect both. An HTTP 401 establishes that the unauthenticated probe received a response. Check model authentication and stream stability independently. If all selected routes fail to get an HTTP response, the command reports `no_http_response` and exits nonzero.
+
+Every command defaults to the current `CODEX_HOME`, or to `.codex` in your user home. Put global options `--codex-home` and `--json` before the subcommand. Substitute the actual directory in the examples.
+
+```powershell
+& $doctorPython -m codex_latency_doctor --codex-home 'D:\Codex Data' --json audit --hours 24
+& $doctorPython -m codex_latency_doctor network --samples 3 --compare-direct
+```
 
 ```sh
-python3 -B skills/codex-latency-doctor/scripts/doctor.py audit --hours 24
+codex-latency-doctor --codex-home '/path/to/codex-home' --json audit --hours 24
+codex-latency-doctor network --samples 3 --compare-direct
 ```
 
 ## Compare chats
 
+Use `tasks` to inspect the context evidence by chat and source. `audit` aggregates all chats in the scanned log window.
+
+```powershell
+& $doctorPython -m codex_latency_doctor tasks --hours 24 --scope interactive --limit 10
+& $doctorPython -m codex_latency_doctor tasks --hours 24 --scope background --limit 10
+```
+
 ```sh
 codex-latency-doctor tasks --hours 24 --scope interactive --limit 10
-codex-latency-doctor --json tasks --hours 24 --scope background
+codex-latency-doctor tasks --hours 24 --scope background --limit 10
 ```
 
-- **Check coverage first.** The report counts chats with recognized context telemetry in the bounded log window. The display limit controls how many are shown. Chat source comes from the local state database when available. Unknown sources stay visible in an unfiltered report. Each `task_…` label belongs to one report.
-- **Compare like workloads.** Use interactive chats for desktop or CLI behavior. Background workers and approval reviewers can use different models and policies. Within a chat, model selections and context limits can change. Multiple observed values indicate that a chat contains different settings over the sampled window.
-- **Read the columns together.** The auto-compact threshold is a trigger based on the context scope in effect. The full context window is a model/runtime limit. Peak context use is the largest recognized sample. A compaction count measures recorded automatic requests. Incomplete logs can leave any of these unknown, and a measured peak may miss activity between samples.
-- **Carry evidence into the next task.** Reference the verified decision, source artifact or test, and the conditions under which it was verified. Check that the reference still applies to the current project, version, and workload. The diagnostic report provides comparable observations and has no mechanism to inject context into a chat. Comparing settings and token use cannot establish which memories were read or how much speed changed.
+| What to check | How to read it |
+| --- | --- |
+| Coverage and source | Check the scanned period, truncation and matched chat count. `--limit` controls how many chats are displayed. Include unclassified chats with `--scope all`. |
+| Auto-compact threshold and full context window | The threshold is a trigger based on the measured context scope. The full window is the model or runtime limit. Check for model or configuration changes when one chat shows several observations. |
+| Sampled peak and compaction requests | The peak is the highest observed sample. Only a log entry containing both context use and its threshold contributes to the above-threshold count. Compaction counts reflect recognized requests. Missing samples leave the corresponding measurement unknown. |
 
-## Diagnose, change, verify
+Each `task_…` label belongs to one report. Compare similar workloads and carry forward verified decisions with the source artifact or test and the conditions under which you verified it. Context size and compaction evidence cannot identify which memories were used or establish how much faster a chat became.
 
-1. **Check a representative incident window.** Compare configured and observed compact thresholds. Check for connection errors near OS wakes. Step-to-header measurements include local preparation and any retries up to the first successful model HTTP headers. They exclude streaming and unpaired requests. Compare these observations separately from completed tool durations. A bounded scan may cover only part of the window.
-2. **Compare network routes if connectivity is in question.** The default route uses curl's inherited proxy environment. Export the proxy in `HTTPS_PROXY` or `ALL_PROXY` if the app uses a proxy that the shell does not inherit. The direct route bypasses curl's proxy. A system VPN can still affect both routes. An HTTP 401 means the endpoint responded to the unauthenticated probe. Check the results for each route. If no selected route produces an HTTP response, the command returns `no_http_response` and exits nonzero.
-3. **Apply changes supported by the evidence.** Enable idle sleep prevention when macOS idle sleep interrupts work. Choose a compact threshold after measuring repeated compaction and checking the model's effective context limit. The case study's 120,000 value was specific to its model and workload.
-4. **Verify with a fresh process and comparable workloads.** When active tasks finish, relaunch the desktop. Audit during a new long task to observe the effective threshold and idle-sleep assertion. Compare compaction, first useful reply and completion times across similar workloads. A short model request verifies basic operation.
+## Compare before and after a change
+
+1. **Capture a baseline.** Run a representative workload and save an audit JSON file immediately afterward. Record the model, reasoning setting, input, starting context, tool workload, and number of runs.
+2. **Change one setting.** If you need a config change, back it up using the workflow below. Confirm that a fresh process adopted the setting and repeat the workload. Use equal-length, non-overlapping observation windows. With the one-hour windows below, take the captures more than one hour apart and complete each workload within its window.
+3. **Read the comparison.** Inspect coverage and sample counts before interpreting differences in step-to-header median and long waits, compactions, retries, errors, or tool timing. Track first visible response and total task time separately if those are the user-facing outcomes you want to compare.
+
+**Windows PowerShell**
+
+```powershell
+# Run before the change.
+& $doctorPython -m codex_latency_doctor --json audit --hours 1 | Set-Content -LiteralPath .\before.json -Encoding utf8
+
+# Run after the follow-up workload.
+& $doctorPython -m codex_latency_doctor --json audit --hours 1 | Set-Content -LiteralPath .\after.json -Encoding utf8
+& $doctorPython -m codex_latency_doctor compare .\before.json .\after.json
+```
+
+**macOS and Linux**
 
 ```sh
-codex-latency-doctor --json audit --hours 24
-codex-latency-doctor network --samples 3 --compare-direct
+# Run before the change.
+codex-latency-doctor --json audit --hours 1 > before.json
+
+# Run after the follow-up workload.
+codex-latency-doctor --json audit --hours 1 > after.json
+codex-latency-doctor compare before.json after.json
+```
+
+`compare` reads two local `--json audit` files. Use `--json compare before.json after.json` for scripted output. A delta is the current value minus the baseline value. Deltas need compatible windows, complete scans and observations for the metric. For older audits without a capture time, check overlap separately. Each audit aggregates all chats in its window, so minimize unrelated work during both test periods.
+
+| What changed | What to check before interpreting it |
+| --- | --- |
+| Step-to-HTTP-header wait | Read the median, maximum and count of waits of at least 30 seconds alongside the number of paired samples. |
+| Context compaction | Compare configured and observed thresholds, automatic request counts and compaction timing across similar models and context workloads. |
+| Model errors and tool timing | Compare recorded retries, HTTP errors and stream errors. Read completed tool timings alongside the number and type of calls. |
+
+This excerpt uses synthetic logs with one paired sample in each window.
+
+```text
+Metric                                         Before        After       Change  Samples (before/after)
+Step to HTTP headers median (s)                  45.0         15.0        -30.0  1 / 1
+Paired header waits >= 30s                          1            0           -1  1 / 1
+```
+
+## Change, verify, and roll back
+
+Close the settings editor and other config writers before applying a change. `apply` backs up the current `config.toml` to `latency-doctor-backups/` and replaces the file atomically. Pick a context threshold based on recorded compaction and the effective model window. The 120,000 value below is from the case study. The separate `--prevent-idle-sleep` option is for macOS idle sleep. macOS handles lid closure separately.
+
+```powershell
+& $doctorPython -m codex_latency_doctor apply --compact-tokens 120000
+& $doctorPython -m codex_latency_doctor verify
+```
+
+```sh
+codex-latency-doctor apply --compact-tokens 120000
 codex-latency-doctor verify
 ```
 
-The following is an example using both case-study settings. The flags work independently. Close the settings editor before applying to avoid concurrent config writes.
+Keep the printed `backup_id`. `verify` checks startup with the Codex CLI on `PATH` using the selected config directory. After active tasks finish, reopen the desktop app and audit a new run to confirm that the runtime adopted the change. To restore the backup, run `rollback BACKUP_ID` with the saved ID. If the configuration changed since `apply`, rollback preserves the current file and you can merge the changes manually.
 
-```sh
-codex-latency-doctor apply --compact-tokens 120000 --prevent-idle-sleep
-codex-latency-doctor verify
-# Replace the placeholder with the ID printed by apply.
-codex-latency-doctor rollback BACKUP_ID
-```
+## Troubleshooting
 
-Put the global options `--codex-home /path/to/codex-home` and `--json` before the command. The default directory is the current `CODEX_HOME`, or `~/.codex`. The startup check tests the selected native CLI with that directory, using its defaults if there is no configuration file. Audit a running desktop task to verify active settings. The optional smoke test below sends a real model request using your existing Codex login. It can load the applicable Codex instructions and memory. The ephemeral flag controls session file persistence.
-
-```sh
-codex exec --ephemeral --skip-git-repo-check --sandbox read-only 'Reply with exactly OK. Do not use tools.'
-```
+| Symptom | Check |
+| --- | --- |
+| Python is missing or older than 3.11 | Check the interpreter commands in the installation instructions. If an appropriate version is installed, select it explicitly and retry. |
+| `missing`, `unavailable`, or `unsupported_schema` in audit logs | Confirm that the tool and your Codex session use the same home directory. Set `--codex-home` for a custom directory. Run a recent task and retry. Log formats can vary by Codex version. |
+| No interactive chats in `tasks` | Try `--scope all` to include chats with an unknown source. If it remains empty, check for recognized context telemetry in the selected window. |
+| `verify` cannot find or start the Codex CLI | Run `Get-Command codex -All` on Windows or `command -v codex` on macOS and Linux, then check `codex --version`. Install the CLI and make it available on `PATH` if needed. Windows supports a native `codex.exe` or the official npm installation with Node.js. Strict startup verification requires a version that supports the app-server check. |
+| `network` cannot find curl | Check `Get-Command curl.exe` in PowerShell or `command -v curl` on macOS and Linux. The probe requires the actual curl executable on `PATH`. |
+| `power.status` is `unsupported_platform` | Expect this on Windows and Linux. Log, configuration, and network checks remain available. |
 
 ## Data and scope
 
-- `audit` summarizes all chats covered by the selected Codex home's bounded runtime log window, alongside local configuration and macOS power diagnostics. Use `tasks` to inspect the context evidence by chat and source.
-- Both commands parse bounded snippets of recognized runtime log entries. `tasks` also reads chat IDs and source metadata from the local state database for grouping and classification. Reports omit raw logs, chat IDs and titles, credentials, configuration URLs, and project paths. Review numeric workload details before sharing a report. Log formats vary by release, so check coverage before drawing conclusions.
-- `apply` writes only the selected values to `config.toml` and stores a private copy in `latency-doctor-backups/`. This copy can contain credentials and should stay local. File replacement is atomic. Rollback checks that the current configuration still matches the applied version. Close the Codex settings editor or any other configuration writer before applying or rolling back.
-- Review missing trust paths before cleanup. An external volume may be unavailable. Project, plugin, agent, and history cleanup stays under the operator's control.
-- Idle sleep prevention protects active work from idle system sleep. macOS handles closing a laptop lid separately.
+- `audit` and `tasks` make bounded reads of recognized runtime logs. `tasks` uses chat IDs and source metadata from local state to group evidence. Reports omit raw logs, chat IDs and titles, credentials, config URLs, and project paths. Review workload details before sharing. Local config backups may contain secrets.
+- Check missing trust paths before cleanup. An external volume may be unavailable. Project, plugin, agent, and history cleanup stays under the operator's control.
 
 ## Test
 

@@ -1,5 +1,6 @@
 """Inspect the small subset of Codex settings relevant to this diagnosis."""
 
+import errno
 import hashlib
 import os
 import re
@@ -7,7 +8,17 @@ import stat
 import tempfile
 import tomllib
 from contextlib import contextmanager
+from functools import cache
 from pathlib import Path
+
+if os.name == "nt":
+    import ctypes
+    from ctypes import wintypes
+
+    class _SecurityAttributes(ctypes.Structure):
+        _fields_ = [
+            ("length", wintypes.DWORD), ("descriptor", wintypes.LPVOID), ("inheritable", wintypes.BOOL),
+        ]
 
 
 COMPACT = "model_auto_compact_token_limit"
@@ -22,8 +33,39 @@ class ConfigError(ValueError):
     """A safe-to-display configuration error."""
 
 
+def _linked(info: os.stat_result) -> bool:
+    return stat.S_ISLNK(info.st_mode) or bool(
+        getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+    )
+
+
+def _open_regular(path: str | Path, flags: int, mode: int = 0o600) -> int:
+    if os.name != "nt":
+        return os.open(path, flags | os.O_NOFOLLOW | os.O_NONBLOCK, mode)
+
+    if flags & os.O_CREAT:
+        try:
+            return os.open(path, flags | os.O_EXCL, mode)
+        except FileExistsError:
+            if flags & os.O_EXCL:
+                raise
+    path = Path(path)
+    before = path.lstat()
+    if _linked(before) or not stat.S_ISREG(before.st_mode):
+        raise OSError("Expected a regular file without reparse points.")
+    fd = os.open(path, flags & ~os.O_CREAT, mode)
+    try:
+        after = path.lstat()
+        if _linked(after) or not os.path.samestat(before, after) or not os.path.samestat(before, os.fstat(fd)):
+            raise OSError("File changed while opening it.")
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
 def _read(path: Path) -> bytes:
-    with open(path, "rb", opener=lambda p, flags: os.open(p, flags | os.O_NOFOLLOW | os.O_NONBLOCK)) as file:
+    with open(path, "rb", opener=_open_regular) as file:
         info = os.fstat(file.fileno())
         if not stat.S_ISREG(info.st_mode) or info.st_size > 2 * 1024 * 1024:
             raise ConfigError("Expected a regular config or backup file of at most 2 MiB.")
@@ -132,7 +174,7 @@ def _edited(original: bytes, compact_tokens: int | None, prevent_idle_sleep: boo
 
 
 def _write_private(path: Path, content: bytes) -> None:
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    fd = _open_regular(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0))
     with os.fdopen(fd, "wb") as file:
         file.write(content)
         file.flush()
@@ -140,40 +182,191 @@ def _write_private(path: Path, content: bytes) -> None:
 
 
 def _replace(path: Path, original: bytes, updated: bytes) -> None:
-    mode = stat.S_IMODE(path.lstat().st_mode) & 0o777
+    if os.name == "nt":
+        descriptor = _windows_acl(path, include_owner=True)
+    else:
+        mode = stat.S_IMODE(path.lstat().st_mode) & 0o777
     fd, temporary = tempfile.mkstemp(prefix=".latency-doctor-", dir=path.parent)
+    temporary_path = Path(temporary)
     try:
         with os.fdopen(fd, "wb") as file:
+            if os.name == "nt":
+                temporary_descriptor = _windows_acl(temporary_path, include_owner=True)
+                if _windows_acl_text(descriptor, _OWNER_SECURITY_INFORMATION) != _windows_acl_text(
+                    temporary_descriptor, _OWNER_SECURITY_INFORMATION
+                ):
+                    raise ConfigError("The replacement would change the config owner. Run as the config owner.")
+                # A file can have a more restrictive DACL than the directory it belongs to.
+                _set_windows_dacl(temporary_path, descriptor)
             file.write(updated)
             file.flush()
-            os.fchmod(file.fileno(), mode)
+            if os.name != "nt":
+                os.fchmod(file.fileno(), mode)
             os.fsync(file.fileno())
         if _read(path) != original:
             raise ConfigError("Configuration changed during the operation. Configuration left unchanged.")
         os.replace(temporary, path)
     finally:
-        Path(temporary).unlink(missing_ok=True)
+        temporary_path.unlink(missing_ok=True)
+
+
+_PRIVATE_DACL = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;OW)"
+_OWNER_SECURITY_INFORMATION = 1
+_DACL_SECURITY_INFORMATION = 4
+_PROTECTED_DACL_SECURITY_INFORMATION = 0x80000000
+_UNPROTECTED_DACL_SECURITY_INFORMATION = 0x20000000
+_ERROR_INSUFFICIENT_BUFFER = 122
+_ERROR_ALREADY_EXISTS = 183
+_SE_FILE_OBJECT = 1
+_SDDL_REVISION_1 = 1
+
+
+@cache
+def _windows_function(library: str, name: str, result, *arguments):
+    function = getattr(ctypes.WinDLL(library, use_last_error=True), name)
+    function.restype = result
+    function.argtypes = arguments
+    return function
+
+
+def _windows_acl(path: Path, *, include_owner: bool = False):
+    get_security = _windows_function(
+        "advapi32", "GetFileSecurityW", wintypes.BOOL,
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD, wintypes.LPDWORD,
+    )
+    information = _DACL_SECURITY_INFORMATION
+    if include_owner:
+        information |= _OWNER_SECURITY_INFORMATION
+    size = wintypes.DWORD()
+    if not get_security(str(path), information, None, 0, ctypes.byref(size)):
+        if ctypes.get_last_error() != _ERROR_INSUFFICIENT_BUFFER:
+            raise ctypes.WinError(ctypes.get_last_error())
+    descriptor = ctypes.create_string_buffer(size.value)
+    if not get_security(str(path), information, descriptor, size.value, ctypes.byref(size)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    return descriptor
+
+
+def _local_free(pointer) -> None:
+    _windows_function("kernel32", "LocalFree", wintypes.HLOCAL, wintypes.HLOCAL)(pointer)
+
+
+def _windows_acl_text(descriptor, information: int = _DACL_SECURITY_INFORMATION) -> str:
+    convert = _windows_function(
+        "advapi32", "ConvertSecurityDescriptorToStringSecurityDescriptorW", wintypes.BOOL,
+        wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(wintypes.LPWSTR), wintypes.LPDWORD,
+    )
+    text = wintypes.LPWSTR()
+    if not convert(descriptor, _SDDL_REVISION_1, information, ctypes.byref(text), None):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        return text.value
+    finally:
+        _local_free(ctypes.cast(text, wintypes.HLOCAL))
+
+
+def _set_windows_dacl(path: Path, descriptor) -> None:
+    get_dacl = _windows_function(
+        "advapi32", "GetSecurityDescriptorDacl", wintypes.BOOL,
+        wintypes.LPVOID, wintypes.LPBOOL, ctypes.POINTER(wintypes.LPVOID), wintypes.LPBOOL,
+    )
+    set_security = _windows_function(
+        "advapi32", "SetNamedSecurityInfoW", wintypes.DWORD, wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD,
+        wintypes.LPVOID, wintypes.LPVOID, wintypes.LPVOID, wintypes.LPVOID,
+    )
+    present = wintypes.BOOL()
+    defaulted = wintypes.BOOL()
+    dacl = wintypes.LPVOID()
+    if not get_dacl(descriptor, ctypes.byref(present), ctypes.byref(dacl), ctypes.byref(defaulted)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    if not present.value:
+        raise ConfigError("Could not preserve the existing Windows DACL.")
+    inherit = (
+        _PROTECTED_DACL_SECURITY_INFORMATION
+        if _windows_acl_text(descriptor).startswith("D:P")
+        else _UNPROTECTED_DACL_SECURITY_INFORMATION
+    )
+    error = set_security(str(path), _SE_FILE_OBJECT, _DACL_SECURITY_INFORMATION | inherit, None, None, dacl, None)
+    if error:
+        raise ctypes.WinError(error)
+
+
+@contextmanager
+def _windows_descriptor(sddl: str):
+    convert = _windows_function(
+        "advapi32", "ConvertStringSecurityDescriptorToSecurityDescriptorW", wintypes.BOOL,
+        wintypes.LPCWSTR, wintypes.DWORD, ctypes.POINTER(wintypes.LPVOID), wintypes.LPDWORD,
+    )
+    descriptor = wintypes.LPVOID()
+    if not convert(sddl, _SDDL_REVISION_1, ctypes.byref(descriptor), None):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        yield descriptor
+    finally:
+        _local_free(descriptor)
+
+
+def _create_private_windows_directory(path: Path) -> None:
+    create_directory = _windows_function(
+        "kernel32", "CreateDirectoryW", wintypes.BOOL, wintypes.LPCWSTR, ctypes.POINTER(_SecurityAttributes),
+    )
+    with _windows_descriptor(_PRIVATE_DACL) as descriptor:
+        attributes = _SecurityAttributes(ctypes.sizeof(_SecurityAttributes), descriptor, False)
+        if not create_directory(str(path), ctypes.byref(attributes)):
+            error = ctypes.get_last_error()
+            if error != _ERROR_ALREADY_EXISTS:
+                raise ctypes.WinError(error)
+
+
+def _require_private_directory(directory: Path) -> None:
+    info = directory.lstat()
+    if _linked(info) or not stat.S_ISDIR(info.st_mode):
+        raise ConfigError("Expected a private backup directory without links.")
+    if os.name == "nt":
+        acl = _windows_acl_text(_windows_acl(directory))
+        if re.sub(r"^D:P(?:AI|AR)*", "D:P", acl) != _PRIVATE_DACL:
+            raise ConfigError("Expected a backup directory with Latency Doctor's restricted Windows ACL.")
+    elif info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise ConfigError("Expected a private backup directory owned by the current user.")
+
+
+def _acquire_lock(lock) -> None:
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as error:
+        if error.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+            raise
+        raise ConfigError("Another Latency Doctor change is in progress.") from None
 
 
 @contextmanager
 def _locked(codex_home: Path, *, create: bool):
-    import fcntl
-
     directory = codex_home / BACKUPS
     if create:
-        directory.mkdir(mode=0o700, exist_ok=True)
-    info = directory.lstat()
-    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
-        raise ConfigError("Expected a private backup directory owned by the current user.")
-    fd = os.open(directory / ".lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
-    with os.fdopen(fd, "rb") as lock:
+        if os.name == "nt":
+            _create_private_windows_directory(directory)
+        else:
+            directory.mkdir(mode=0o700, exist_ok=True)
+    _require_private_directory(directory)
+    fd = _open_regular(directory / ".lock", os.O_RDWR | os.O_CREAT | getattr(os, "O_BINARY", 0))
+    with os.fdopen(fd, "r+b") as lock:
         if not stat.S_ISREG(os.fstat(lock.fileno()).st_mode):
             raise ConfigError("Expected a regular lock file.")
+        _acquire_lock(lock)
         try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            raise ConfigError("Another Latency Doctor change is in progress.") from None
-        yield directory
+            yield directory
+        finally:
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 def _digest(content: bytes) -> bytes:
@@ -194,6 +387,9 @@ def change_config(codex_home: Path, *, compact_tokens: int | None, prevent_idle_
         if _read(path) != original:
             raise ConfigError("Configuration changed during the operation. Configuration left unchanged.")
         backup = Path(tempfile.mkdtemp(prefix="backup-", dir=backups))
+        if os.name == "nt":
+            _set_windows_dacl(backup, _windows_acl(backups))
+            _require_private_directory(backup)
         _write_private(backup / "config.toml", original)
         _write_private(backup / "applied.sha256", _digest(updated))
         _replace(path, original, updated)
@@ -206,9 +402,7 @@ def restore_config(codex_home: Path, backup_id: str) -> dict:
     path = codex_home / "config.toml"
     with _locked(codex_home, create=False) as backups:
         backup = backups / backup_id
-        info = backup.lstat()
-        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
-            raise ConfigError("Expected a private backup owned by the current user.")
+        _require_private_directory(backup)
         current = _read(path)
         original = _read(backup / "config.toml")
         _parse(original)

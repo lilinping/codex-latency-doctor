@@ -10,7 +10,7 @@ from bisect import bisect_left, bisect_right
 from collections import Counter, defaultdict
 from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from statistics import median
 
@@ -486,7 +486,12 @@ def collect_diagnostics(codex_home: Path, hours: int) -> dict:
     cutoff = now - hours * 3600
     logs, model_errors = _read_logs(codex_home, cutoff, now)
     power = _read_power(cutoff, now, model_errors, logs["status"] == "ok")
-    return {"window_hours": hours, "logs": logs, "power": power}
+    return {
+        "window_hours": hours,
+        "captured_at_utc": datetime.fromtimestamp(now, UTC).isoformat(timespec="seconds"),
+        "logs": logs,
+        "power": power,
+    }
 
 
 def collect_tasks(codex_home: Path, hours: int, limit: int, scope: str = "all") -> dict:

@@ -5,6 +5,8 @@ import os
 import shutil
 import statistics
 import subprocess
+import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 
@@ -24,6 +26,18 @@ FAILURES = {
 }
 
 
+def _windows_programs(*names: str) -> Iterator[Path]:
+    # Python 3.11's shutil.which implicitly checks the working directory.
+    for entry in os.get_exec_path():
+        directory = Path(entry.strip('"'))
+        if not directory.is_absolute():
+            continue
+        for name in names:
+            program = directory / name
+            if os.path.isfile(program):
+                yield program
+
+
 def _route(curl: str, endpoint: str, *, direct: bool) -> dict:
     flags = ["--noproxy", "*"] if direct else []
     command = [
@@ -33,7 +47,10 @@ def _route(curl: str, endpoint: str, *, direct: bool) -> dict:
         *flags, "--", endpoint,
     ]
     try:
-        process = subprocess.run(command, capture_output=True, text=True, timeout=7, check=False)
+        process = subprocess.run(
+            command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            encoding="ascii", errors="replace", timeout=7, check=False,
+        )
     except subprocess.TimeoutExpired:
         return {"status": "timeout"}
     except OSError:
@@ -60,9 +77,10 @@ def _summary(samples: list[dict]) -> dict:
 
 
 def probe_network(service: str, samples: int, *, compare_direct: bool) -> dict:
-    curl = shutil.which("curl")
-    if not curl:
+    executable = next(_windows_programs("curl.exe"), None) if sys.platform == "win32" else shutil.which("curl")
+    if not executable:
         return {"status": "curl_unavailable"}
+    curl = str(executable)
     environment_route, direct_route = [], []
     for _ in range(samples):
         environment_route.append(_route(curl, ENDPOINTS[service], direct=False))
@@ -76,14 +94,29 @@ def probe_network(service: str, samples: int, *, compare_direct: bool) -> dict:
 
 
 def verify_native(codex_home: Path) -> dict:
-    codex = shutil.which("codex")
-    if not codex:
+    executable = (
+        next(_windows_programs("codex.exe", "codex.cmd"), None)
+        if sys.platform == "win32" else shutil.which("codex")
+    )
+    if not executable:
         return {"status": "codex_not_found"}
+    command = [str(executable)]
+    if sys.platform == "win32" and Path(executable).suffix.lower() == ".cmd":
+        # Launch npm's official entrypoint directly to avoid cmd.exe parsing paths or arguments.
+        directory = Path(executable).parent
+        local_shim = directory.name.lower() == ".bin" and directory.parent.name.lower() == "node_modules"
+        modules = directory.parent if local_shim else directory / "node_modules"
+        entrypoint = modules / "@openai" / "codex" / "bin" / "codex.js"
+        adjacent_node = directory / "node.exe"
+        node = adjacent_node if os.path.isfile(adjacent_node) else next(_windows_programs("node.exe"), None)
+        if node is None or not os.path.isfile(entrypoint):
+            return {"status": "codex_not_runnable"}
+        command = [str(node), str(entrypoint)]
     environment = os.environ.copy()
     environment["CODEX_HOME"] = str(codex_home.absolute())
     try:
         result = subprocess.run(
-            [codex, "app-server", "--strict-config", "--print-startup-config"],
+            [*command, "app-server", "--strict-config", "--print-startup-config"],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             env=environment, timeout=15, check=False,
         )

@@ -1,9 +1,11 @@
+import os
 import stat
 import tempfile
 import tomllib
 import unittest
 from pathlib import Path
 
+from codex_latency_doctor import config
 from codex_latency_doctor.config import (
     BACKUPS,
     ConfigError,
@@ -27,17 +29,49 @@ class ConfigTests(unittest.TestCase):
             b'[mcp_servers.example.env]\r\nKEY = "sensitive-placeholder"\r\n'
         )
         self.path.write_bytes(original)
-        self.path.chmod(0o640)
+        if os.name == "nt":
+            with config._windows_descriptor("D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;OW)") as descriptor:
+                config._set_windows_dacl(self.path, descriptor)
+            original_acl = config._windows_acl_text(config._windows_acl(self.path))
+        else:
+            self.path.chmod(0o640)
         result = change_config(self.home, compact_tokens=120000, prevent_idle_sleep=True)
         self.assertEqual(result["status"], "applied")
         expected = original.replace(b"80_000", b"120000").replace(b"= false", b"= true")
         self.assertEqual(self.path.read_bytes(), expected)
-        self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o640)
         backup = self.home / BACKUPS / result["backup_id"] / "config.toml"
         self.assertEqual(backup.read_bytes(), original)
-        self.assertEqual(stat.S_IMODE(backup.stat().st_mode), 0o600)
+        if os.name == "nt":
+            self.assertEqual(config._windows_acl_text(config._windows_acl(self.path)), original_acl)
+            acl = config._windows_acl_text(config._windows_acl(backup))
+            self.assertRegex(acl, r";;;(?:OW|S-1-3-4)\)")
+            self.assertNotRegex(acl, r";;;(?:WD|AU|BU)\)")
+        else:
+            self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o640)
+            self.assertEqual(stat.S_IMODE(backup.stat().st_mode), 0o600)
         self.assertEqual(restore_config(self.home, result["backup_id"])["status"], "restored")
         self.assertEqual(self.path.read_bytes(), original)
+        if os.name == "nt":
+            self.assertEqual(config._windows_acl_text(config._windows_acl(self.path)), original_acl)
+
+    def test_concurrent_write_is_refused(self):
+        self.path.write_bytes(b"")
+        with config._locked(self.home, create=True):
+            with self.assertRaisesRegex(ConfigError, "Another Latency Doctor change"):
+                change_config(self.home, compact_tokens=120000, prevent_idle_sleep=False)
+            self.assertEqual(self.path.read_bytes(), b"")
+            self.assertFalse(list((self.home / BACKUPS).glob("backup-*")))
+        self.assertEqual(change_config(self.home, compact_tokens=120000, prevent_idle_sleep=False)["status"], "applied")
+
+    def test_existing_backup_directory_with_unexpected_permissions_is_refused(self):
+        self.path.write_bytes(b"")
+        directory = self.home / BACKUPS
+        directory.mkdir()
+        if os.name != "nt":
+            directory.chmod(0o755)
+        with self.assertRaises(ConfigError):
+            change_config(self.home, compact_tokens=120000, prevent_idle_sleep=False)
+        self.assertEqual(self.path.read_bytes(), b"")
 
     def test_add_missing_settings(self):
         self.path.write_text('[projects."/example"]\ntrust_level = "trusted"')
@@ -74,7 +108,12 @@ class ConfigTests(unittest.TestCase):
     def test_symlink_cannot_be_written(self):
         target = self.home / "original.toml"
         target.write_text("")
-        self.path.symlink_to(target)
+        try:
+            self.path.symlink_to(target)
+        except OSError as error:
+            if os.name == "nt" and error.winerror == 1314:
+                self.skipTest("The Windows runner cannot create a symlink.")
+            raise
         with self.assertRaises(OSError):
             change_config(self.home, compact_tokens=120000, prevent_idle_sleep=False)
         self.assertEqual(target.read_text(), "")

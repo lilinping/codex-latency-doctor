@@ -7,6 +7,7 @@ permissions:
 
 jobs:
   test:
+    timeout-minutes: 10
     strategy:
       matrix:
         include:
@@ -14,6 +15,8 @@ jobs:
             python: "3.11"
           - os: macos-latest
             python: "3.14"
+          - os: windows-latest
+            python: "3.11"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -23,14 +26,13 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Build and install the wheel
-        run: |
-          python -m pip wheel --no-deps . --wheel-dir dist
-          python -m pip install --no-deps dist/*.whl
+        run: python -m pip install --no-deps .
       - name: Verify the installed CLI and run tests
         run: |
           codex-latency-doctor --version
           python -m unittest discover -s tests -v
       - name: Run the skill from a standalone installation
+        if: runner.os != 'Windows'
         run: |
           sandbox="$(mktemp -d)"
           trap 'rm -rf "$sandbox"' EXIT
@@ -43,3 +45,40 @@ jobs:
           python -E -S -B "$installed_skill" --codex-home "$sandbox/codex-home" --json audit --hours 1 > skill.json
           codex-latency-doctor --codex-home "$sandbox/codex-home" --json audit --hours 1 > cli.json
           python -c 'import json; assert json.load(open("skill.json"))["config"] == json.load(open("cli.json"))["config"]'
+      - name: Run the skill and native Codex on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $sandbox = Join-Path $env:RUNNER_TEMP 'Latency Doctor Windows'
+          $skill = Join-Path $sandbox 'installed skill'
+          $homePath = Join-Path $sandbox 'Codex Home'
+          New-Item -ItemType Directory -Force -Path $homePath | Out-Null
+          Copy-Item -Recurse skills/codex-latency-doctor $skill
+          $launcher = Join-Path $skill 'scripts/doctor.py'
+          Set-Location $sandbox
+
+          $skillVersion = python -E -S -B $launcher --version
+          if ($skillVersion -ne (codex-latency-doctor --version)) { throw 'Version mismatch' }
+          $config = Join-Path $homePath 'config.toml'
+          'model_auto_compact_token_limit = 80000' | Set-Content -Encoding utf8 $config
+          python -E -S -B $launcher --codex-home $homePath --json audit --hours 1 |
+            Set-Content -Encoding utf8BOM before.json
+          $apply = python -E -S -B $launcher --codex-home $homePath --json apply --compact-tokens 120000 |
+            ConvertFrom-Json
+          python -E -S -B $launcher --codex-home $homePath --json audit --hours 1 |
+            Set-Content -Encoding Unicode after.json
+          $comparison = codex-latency-doctor --json compare before.json after.json | ConvertFrom-Json
+          if ($comparison.baseline.configured_compact_tokens -ne 80000 -or
+              $comparison.current.configured_compact_tokens -ne 120000 -or
+              $comparison.deltas_available) { throw 'Unexpected audit comparison' }
+
+          curl.exe --version
+          $prefix = Join-Path $sandbox 'npm'
+          npm.cmd install --global --prefix $prefix --no-audit --no-fund @openai/codex@0.171.0
+          $env:Path = "$prefix;$env:Path"
+          codex-latency-doctor --codex-home $homePath verify
+          codex-latency-doctor --codex-home $homePath rollback $apply.backup_id
+          if ((Get-Content $config) -ne 'model_auto_compact_token_limit = 80000') {
+            throw 'Rollback did not restore the original config'
+          }
