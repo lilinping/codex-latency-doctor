@@ -80,6 +80,15 @@ jobs:
               (Get-FileHash $config).Hash -ne $originalHash) { throw 'Unexpected config preview' }
           $apply = python -E -S -B $launcher --codex-home $homePath --json apply @changes |
             ConvertFrom-Json
+          $appliedHash = (Get-FileHash $config).Hash
+          $afterPreview = python -E -S -B $launcher --codex-home $homePath --json apply --dry-run @changes |
+            ConvertFrom-Json
+          $backups = codex-latency-doctor --codex-home $homePath --json backups | ConvertFrom-Json
+          if ($afterPreview.status -ne 'unchanged' -or
+              $backups.status -ne 'ok' -or
+              @($backups.matching_backup_ids).Count -ne 1 -or
+              $backups.matching_backup_ids[0] -ne $apply.backup_id -or
+              (Get-FileHash $config).Hash -ne $appliedHash) { throw 'Unexpected interrupted apply recovery' }
           python -E -S -B $launcher --codex-home $homePath --json audit --hours 1 |
             Set-Content -Encoding Unicode after.json
           $comparison = codex-latency-doctor --json compare before.json after.json | ConvertFrom-Json

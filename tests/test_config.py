@@ -10,6 +10,7 @@ from codex_latency_doctor.config import (
     BACKUPS,
     ConfigError,
     change_config,
+    find_matching_backups,
     inspect_config,
     restore_config,
 )
@@ -71,6 +72,8 @@ class ConfigTests(unittest.TestCase):
             directory.chmod(0o755)
         with self.assertRaises(ConfigError):
             change_config(self.home, compact_tokens=120000, prevent_idle_sleep=False)
+        with self.assertRaises(ConfigError):
+            find_matching_backups(self.home)
         self.assertEqual(self.path.read_bytes(), b"")
 
     def test_add_missing_settings(self):
@@ -143,6 +146,36 @@ class ConfigTests(unittest.TestCase):
                     change_config(self.home, **settings)
                 self.assertEqual(self.path.read_bytes(), original)
                 self.assertFalse((self.home / BACKUPS).exists())
+
+    def test_find_backups_without_a_backup_directory_is_read_only(self):
+        self.assertEqual(find_matching_backups(self.home), {"status": "ok", "matching_backup_ids": []})
+        self.assertEqual(list(self.home.iterdir()), [])
+
+    def test_find_backups_after_unchanged_apply_keeps_all_matches(self):
+        self.path.write_bytes(b"")
+        first = change_config(self.home, compact_tokens=120000)["backup_id"]
+        change_config(self.home, compact_tokens=160000)
+        second = change_config(self.home, compact_tokens=120000)["backup_id"]
+        self.assertEqual(change_config(self.home, compact_tokens=120000), {"status": "unchanged"})
+
+        directory = self.home / BACKUPS
+        before = self.path.read_bytes()
+        lock = directory / ".lock"
+        lock.unlink()
+        self.assertEqual(find_matching_backups(self.home), {"status": "ok", "matching_backup_ids": sorted([first, second])})
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertFalse(lock.exists())
+
+    def test_find_backups_excludes_unrestorable_original(self):
+        self.path.write_bytes(b"")
+        backup_id = change_config(self.home, compact_tokens=120000)["backup_id"]
+        original = self.home / BACKUPS / backup_id / "config.toml"
+        original.write_bytes(self.path.read_bytes())
+        self.assertEqual(find_matching_backups(self.home)["matching_backup_ids"], [])
+        original.write_bytes(b"[invalid")
+        self.assertEqual(find_matching_backups(self.home)["matching_backup_ids"], [])
+        original.unlink()
+        self.assertEqual(find_matching_backups(self.home)["matching_backup_ids"], [])
 
     def test_reject_inline_table_and_invalid_toml(self):
         for old in ("desktop = { preventSleepWhileRunning = false }\n", "[desktop"):

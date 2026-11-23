@@ -448,6 +448,34 @@ def change_config(
     return {"status": "applied", "backup_id": backup.name, "desktop_reload_needed": True, "changes": changes}
 
 
+def find_matching_backups(codex_home: Path) -> dict:
+    """Find candidate rollback IDs from a read-only snapshot of the current file."""
+    directory = codex_home / BACKUPS
+    matching_backup_ids = []
+    result = {"status": "ok", "matching_backup_ids": matching_backup_ids}
+    try:
+        _require_private_directory(directory)
+    except FileNotFoundError:
+        return result
+
+    current = _read(codex_home / "config.toml")
+    digest = _digest(current)
+    for backup in sorted(directory.iterdir()):
+        if not ID_PATTERN.fullmatch(backup.name):
+            continue
+        try:
+            _require_private_directory(backup)
+            if _read(backup / "applied.sha256") != digest:
+                continue
+            original = _read(backup / "config.toml")
+            _parse(original)
+        except (ConfigError, OSError):
+            continue
+        if original != current:
+            matching_backup_ids.append(backup.name)
+    return result
+
+
 def restore_config(codex_home: Path, backup_id: str) -> dict:
     if not ID_PATTERN.fullmatch(backup_id):
         raise ConfigError("Invalid backup ID.")

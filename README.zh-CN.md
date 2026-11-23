@@ -18,7 +18,7 @@ Codex 长时间没有可见进度时，用这个本地工具查看上下文压�
 在 Codex 聊天中发送：
 
 ```text
-$skill-installer 请从 https://github.com/lilinping/codex-latency-doctor/tree/v0.5.0/skills/codex-latency-doctor 安装技能
+$skill-installer 请从 https://github.com/lilinping/codex-latency-doctor/tree/v0.6.0/skills/codex-latency-doctor 安装技能
 ```
 
 安装后新建聊天并运行：
@@ -29,7 +29,7 @@ $codex-latency-doctor 只读排查最近 24 小时的卡顿，给出日志覆盖
 
 技能已包含诊断程序。安装后使用现有的 Python 运行本地检查，无需 pip。技能列表还未显示此技能时，等活动任务结束后重启 Codex。
 
-如果已安装 v0.4.0，从 Codex 目录下的 `skills` 中把 `codex-latency-doctor` 目录移到扫描范围之外做备份，例如放到 Codex 目录下的 `codex-latency-doctor-v0.4.0-backup`。然后用上面的指令安装 v0.5.0 并新建聊天。默认 Codex 目录是用户主目录下的 `.codex`，自定义位置以 `CODEX_HOME` 为准。
+如果已安装旧版，把 `codex-latency-doctor` 文件夹移出 Codex 目录下的 `skills` 目录做备份。例如，可以把 v0.5.0 的备份放在 Codex 目录下，命名为 `codex-latency-doctor-v0.5.0-backup`。然后用上面的指令安装 v0.6.0 并新建聊天。默认 Codex 目录是用户主目录下的 `.codex`，自定义位置以 `CODEX_HOME` 为准。
 
 ### Windows PowerShell 安装 CLI
 
@@ -40,7 +40,7 @@ $codex-latency-doctor 只读排查最近 24 小时的卡顿，给出日志覆盖
 ```powershell
 py -3 -m venv .venv
 $doctorPython = '.\.venv\Scripts\python.exe'
-& $doctorPython -m pip install 'https://github.com/lilinping/codex-latency-doctor/releases/download/v0.5.0/codex_latency_doctor-0.5.0-py3-none-any.whl'
+& $doctorPython -m pip install 'https://github.com/lilinping/codex-latency-doctor/releases/download/v0.6.0/codex_latency_doctor-0.6.0-py3-none-any.whl'
 & $doctorPython -m codex_latency_doctor --version
 & $doctorPython -m codex_latency_doctor audit --hours 24
 ```
@@ -52,7 +52,7 @@ $doctorPython = '.\.venv\Scripts\python.exe'
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install 'https://github.com/lilinping/codex-latency-doctor/releases/download/v0.5.0/codex_latency_doctor-0.5.0-py3-none-any.whl'
+python -m pip install 'https://github.com/lilinping/codex-latency-doctor/releases/download/v0.6.0/codex_latency_doctor-0.6.0-py3-none-any.whl'
 codex-latency-doctor --version
 codex-latency-doctor audit --hours 24
 ```
@@ -105,11 +105,13 @@ codex-latency-doctor tasks --hours 24 --scope background --limit 10
 
 `task_…` 仅用于当前报告。对照时选同类聊天，并记录可复查的任务结果、配置和负载。`tasks` 的上下文统计无法识别具体读取了哪些记忆。需要判断是否更快时，再比较下面的耗时和长尾指标。
 
+上下文压缩或换到新聊天后，沿用上一步已核实的产物，从待办步骤继续。输入和目标状态未变时，复用近期的证据。需要跟进运行中的任务直至完成时，先限时等待状态变化或新输出，再查询。排查时若状态相同且已无可推进的检查，就结束本次排查。
+
 ### 对比优化前后
 
-1. **保存基线。** 在改配置之前先跑一组代表性的任务。记录模型、推理档、输入、已有上下文、工具负载和任务次数。任务结束后马上保存 JSON 报告。
-2. **一次只改一项。** 如需更改配置，先按下面的修改流程保留备份。在新进程中核对配置生效后，重复同样的任务。让两次报告的观察窗口等长且互不重叠。示例使用 1 小时窗口，请让两次采集间隔超过 1 小时，并在各自窗口内完成相应测试。
-3. **查看对比。** 查看基线、当前值和变化量，再核对两次报告的扫描覆盖与有效样本数。重点看响应头延迟及长尾、压缩请求、模型重试和工具耗时。样本过少、覆盖不全或负载不同，变化只能作为线索。用户可见的首条回复和任务总耗时可以在重复任务时另外计时。
+1. **保存基线。** 优先使用已有的可比审计报告，或在改配置前执行一次有代表性的只读或隔离任务，再保存 JSON 报告。记录模型、推理档、输入、已有上下文和工具负载。涉及发布、发消息或修改真实数据的任务，使用预演或测试数据复测。
+2. **一次只改一项。** 如需更改配置，按下面的修改流程保留备份并确认设置生效。优化后执行一次相同的安全任务。需要更多样本时，按明确的测量实验安排。让两次报告的观察窗口等长且互不重叠。示例使用 1 小时窗口，两次采集间隔应超过 1 小时，并在各自窗口内完成相应测试。
+3. **查看对比。** 查看基线、当前值和变化量，再核对两次报告的扫描覆盖与有效样本数。重点看响应头延迟及长尾、压缩请求、模型重试和工具耗时。用户可见的首条回复和任务总耗时可以另外计时。样本不足时，报告已有发现和缺失的证据，结束本次对比。
 
 **Windows PowerShell**
 
@@ -164,8 +166,8 @@ Paired header waits >= 30s                          1            0           -1 
 | 观察到的证据 | 可以执行的修改 | 修改后怎么确认 |
 | --- | --- | --- |
 | 同类长任务频繁自动压缩，每次压缩有明显等待 | `--compact-tokens 120000`。结合实际模型窗口和上下文用量选择阈值。案例确认了 120,000 生效，长任务能节省多少时间仍缺少受控对照。 | 用新任务的日志确认阈值，再比较压缩次数、耗时和任务完成质量。 |
-| 同类请求反复出现长等待，任务允许降低推理档 | `--reasoning-effort medium`。工具接受 `low`、`medium`、`high`，选择模型支持的档位。 | 重复同样的任务，同时检查耗时和答复质量。案例中进一步调低的收益并不稳定。 |
-| 启动日志反复指向同一个 MCP 服务，且当前工作流允许暂停它 | `--disable-mcp NAME`。把 `NAME` 换成已有 `[mcp_servers.NAME]` 配置表的服务名，支持英文字母、数字、连字符和下划线。修复服务后可用 `--enable-mcp NAME` 恢复。 | 检查对应启动报错，并测试依赖该服务的工作流。报错消失只表明对应的启动问题解除。 |
+| 同类请求反复出现长等待，任务允许降低推理档 | `--reasoning-effort medium`。工具接受 `low`、`medium`、`high`，选择模型支持的档位。 | 用上一节的安全任务对照耗时和答复质量。案例中进一步调低的收益并不稳定。 |
+| 启动日志反复指向同一个 MCP 服务，且当前工作流允许暂停它 | `--disable-mcp NAME`。把 `NAME` 换成已有 `[mcp_servers.NAME]` 配置表的服务名，支持英文字母、数字、连字符和下划线。修复服务后可用 `--enable-mcp NAME` 恢复。 | 检查对应启动报错，并在隔离环境中测试依赖该服务的工作流。报错消失只表明对应的启动问题解除。 |
 | macOS 空闲睡眠与任务中断重合 | `--prevent-idle-sleep`。合盖仍可触发系统睡眠。 | 重新打开桌面应用，在任务运行期间用 `audit` 查看 `power.codex_idle_sleep_assertion`，任务结束后再核对睡眠事件。 |
 
 如果 HTTPS 探测证据不足，先复核真实模型请求和流式稳定性，再决定是否需要调整代理。上表的命令只修改指定的 Codex 设置。
@@ -194,9 +196,9 @@ codex-latency-doctor verify
 $codex-latency-doctor 在当前 Codex 目录先预览，再将自动压缩阈值改为 120000。只改这一项，执行校验并告诉我备份 ID。
 ```
 
-`verify` 用 `PATH` 上的 Codex CLI 启动新进程执行严格配置检查。使用桌面应用时，等活动任务完成后重新打开应用，重跑相同任务并检查改动是否生效。再用 `compare` 查看两次报告，核对预期指标和任务质量。
+应用改动后运行一次 `verify`。它用 `PATH` 上的 Codex CLI 启动新进程执行严格配置检查。需要比较桌面应用时，等活动任务完成，必要时重新打开应用，从界面或新任务的运行日志确认改动生效，再做对比。启动校验失败或无法确认运行时已生效时，记录当前结果，停止本次对比。
 
-校验失败或出现退化时，用 `apply` 返回的实际 ID 替换下面的 `BACKUP_ID`。如果配置在应用改动后又被编辑过，回滚会拒绝覆盖当前文件。此时可在本地对照备份，手工合并要撤销的设置。
+校验失败或出现退化后，如果决定回滚，用已确认的备份 ID 替换下面的 `BACKUP_ID`。该 ID 通常可以从 `apply` 的结果中获取。如果配置在应用改动后又被编辑过，回滚会拒绝覆盖当前文件。此时可在本地对照备份，手工合并要撤销的设置。
 
 ```powershell
 & $doctorPython -m codex_latency_doctor rollback BACKUP_ID
@@ -208,7 +210,27 @@ codex-latency-doctor rollback BACKUP_ID
 codex-latency-doctor verify
 ```
 
-恢复后，使用桌面应用时等活动任务结束再重新打开，并复查受影响的工作流。
+恢复后，使用桌面应用时等活动任务结束再重新打开，并用只读或隔离任务复查受影响的工作流。
+
+#### 写入中断后查找备份
+
+如果 `apply` 在返回结果前中断，使用原参数和同一个 Codex 目录运行 `apply --dry-run`。返回 `planned` 时，先根据原请求核对尚待写入的变更。返回 `unchanged` 时，说明文件已经包含目标设置，可以运行 `backups` 查找备份 ID。
+
+```powershell
+& $doctorPython -m codex_latency_doctor --json backups
+```
+
+```sh
+codex-latency-doctor --json backups
+```
+
+已安装技能时，也可以在 Codex 聊天中请求查询。
+
+```text
+$codex-latency-doctor 上一次 apply --compact-tokens 120000 的结果丢失了。请在同一个 Codex 目录做预览，如果目标设置已经在磁盘上，就列出匹配的备份 ID。
+```
+
+如果 `apply` 指定了 `--codex-home`，在 `backups` 前传入同一个目录。只读命令在 `matching_backup_ids` 中列出保存的摘要与当前配置匹配的备份。匹配只说明文件状态一致。还需根据独立记录确认备份来自这次中断的操作，例如可查到的原命令输出。无匹配、有多个匹配或无法确认来源时，暂缓回滚。确定要恢复时，再对已确认的 ID 执行 `rollback`。
 
 ## 安装和使用遇到问题
 

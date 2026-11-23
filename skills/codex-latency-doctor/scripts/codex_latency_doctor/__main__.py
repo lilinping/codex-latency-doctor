@@ -9,7 +9,7 @@ from pathlib import Path
 from . import __version__
 from .checks import probe_network, verify_native
 from .comparison import METRICS, ComparisonError, compare_audits
-from .config import REASONING_EFFORTS, ConfigError, change_config, inspect_config, restore_config
+from .config import REASONING_EFFORTS, ConfigError, change_config, find_matching_backups, inspect_config, restore_config
 from .diagnostics import collect_diagnostics, collect_tasks
 
 
@@ -61,6 +61,7 @@ def _arguments(argv: list[str] | None) -> argparse.Namespace:
     mcp = apply.add_mutually_exclusive_group()
     mcp.add_argument("--disable-mcp", metavar="NAME", help="Disable an existing MCP registration.")
     mcp.add_argument("--enable-mcp", metavar="NAME", help="Re-enable an existing MCP registration.")
+    commands.add_parser("backups", help="List rollback backup IDs matching the current configuration without writing files.")
     restore = commands.add_parser("rollback", help="Restore an unchanged applied configuration from its backup.")
     restore.add_argument("backup_id")
     return parser.parse_args(argv)
@@ -177,6 +178,8 @@ def main(argv: list[str] | None = None) -> int:
                     mcp_name=mcp_name,
                     mcp_enabled=None if mcp_name is None else args.enable_mcp is not None,
                 )
+            case "backups":
+                result = find_matching_backups(codex_home)
             case "rollback":
                 result = restore_config(codex_home, args.backup_id)
     except (ConfigError, ComparisonError) as error:

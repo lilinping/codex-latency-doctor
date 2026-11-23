@@ -13,7 +13,7 @@ Requires Python 3.11+ on Windows 10/11, macOS, or Linux. Check `py -3 --version`
 In a Codex chat, ask the built-in skill installer to install the pinned version.
 
 ```text
-$skill-installer Install https://github.com/lilinping/codex-latency-doctor/tree/v0.5.0/skills/codex-latency-doctor
+$skill-installer Install https://github.com/lilinping/codex-latency-doctor/tree/v0.6.0/skills/codex-latency-doctor
 ```
 
 Open a new chat and invoke the installed skill.
@@ -24,7 +24,7 @@ $codex-latency-doctor Investigate long pauses over the last 24 hours. Use read-o
 
 The skill bundles the CLI and uses your installed Python with no runtime dependencies. If the skill is missing from the picker, restart Codex after active tasks finish.
 
-To upgrade from v0.4.0, move the `codex-latency-doctor` folder out of the Codex home's `skills` directory. You can keep it as `codex-latency-doctor-v0.4.0-backup` directly under the Codex home. Then install v0.5.0 with the command above and open a new chat. The default Codex home is `.codex` under your user home, unless `CODEX_HOME` points elsewhere.
+To upgrade an existing skill, move the `codex-latency-doctor` folder out of the Codex home's `skills` directory. For example, keep a v0.5.0 copy as `codex-latency-doctor-v0.5.0-backup` directly under the Codex home. Then install v0.6.0 with the command above and open a new chat. The default Codex home is `.codex` under your user home, unless `CODEX_HOME` points elsewhere.
 
 ### Install the CLI in Windows PowerShell
 
@@ -35,7 +35,7 @@ For Codex running inside WSL, follow the Linux steps inside that WSL distributio
 ```powershell
 py -3 -m venv .venv
 $doctorPython = '.\.venv\Scripts\python.exe'
-& $doctorPython -m pip install 'https://github.com/lilinping/codex-latency-doctor/releases/download/v0.5.0/codex_latency_doctor-0.5.0-py3-none-any.whl'
+& $doctorPython -m pip install 'https://github.com/lilinping/codex-latency-doctor/releases/download/v0.6.0/codex_latency_doctor-0.6.0-py3-none-any.whl'
 & $doctorPython -m codex_latency_doctor --version
 & $doctorPython -m codex_latency_doctor audit --hours 24
 ```
@@ -47,7 +47,7 @@ Calling the virtual environment's Python executable directly avoids activating t
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install 'https://github.com/lilinping/codex-latency-doctor/releases/download/v0.5.0/codex_latency_doctor-0.5.0-py3-none-any.whl'
+python -m pip install 'https://github.com/lilinping/codex-latency-doctor/releases/download/v0.6.0/codex_latency_doctor-0.6.0-py3-none-any.whl'
 codex-latency-doctor --version
 codex-latency-doctor audit --hours 24
 ```
@@ -100,11 +100,13 @@ codex-latency-doctor tasks --hours 24 --scope background --limit 10
 
 Each `task_…` label belongs to one report. Compare similar workloads and carry forward verified decisions with the source artifact or test and the conditions under which you verified it. Context size and compaction evidence cannot identify which memories were used or establish how much faster a chat became.
 
+After context compaction or in a new chat, use the last verified result and continue with the next pending step. Reuse recent evidence while the inputs and target state still match. When following an active task to completion, wait for a state change or new output with a timeout before checking again. During diagnosis, stop when the same state leaves no further check to make.
+
 ## Compare before and after a change
 
-1. **Capture a baseline.** Run a representative workload and save an audit JSON file immediately afterward. Record the model, reasoning setting, input, starting context, tool workload, and number of runs.
-2. **Change one setting.** If you need a config change, back it up using the workflow below. Confirm that a fresh process adopted the setting and repeat the workload. Use equal-length, non-overlapping observation windows. With the one-hour windows below, take the captures more than one hour apart and complete each workload within its window.
-3. **Read the comparison.** Inspect coverage and sample counts before interpreting differences in step-to-header median and long waits, compactions, retries, errors, or tool timing. Track first visible response and total task time separately if those are the user-facing outcomes you want to compare.
+1. **Capture a baseline.** Use an existing comparable audit or run a representative read-only or isolated workload once and save an audit JSON file afterward. Record the model, reasoning setting, input, starting context, and tool workload. For jobs that publish, send messages, or change real data, use a dry run or test fixture.
+2. **Change one setting.** If you need a config change, back it up using the workflow below and confirm the setting took effect. Run the same safe workload once for the follow-up. Reserve additional runs for an explicit measurement experiment. Use equal-length, non-overlapping observation windows. With the one-hour windows below, take the captures more than one hour apart and complete each workload within its window.
+3. **Read the comparison.** Inspect coverage and sample counts before interpreting differences in step-to-header median and long waits, compactions, retries, errors, or tool timing. Track first visible response and total task time separately if those are the user-facing outcomes you want to compare. If the samples are insufficient, record what was observed and what evidence is missing, then end the comparison.
 
 **Windows PowerShell**
 
@@ -157,8 +159,8 @@ Choose one setting based on the evidence, then save the baseline from the sectio
 | Evidence | Change to try | Follow-up check |
 | --- | --- | --- |
 | Frequent costly automatic compactions in comparable chats | `--compact-tokens 120000`. Choose a threshold based on the effective model window and observed context load. The case study confirmed adoption of 120,000. The effect on long-task duration remains unmeasured in a controlled comparison. | Confirm the observed runtime threshold, then compare compaction counts, durations, and task quality. |
-| Repeated comparable requests show a long wait, with room to lower reasoning effort | `--reasoning-effort medium` or another level supported by the model. The tool accepts `low`, `medium`, and `high`. | Repeat the same task and check both timing and answer quality. Lowering effort produced mixed timing results in the case study. |
-| Startup logs repeatedly identify one MCP server that the workload can run without | `--disable-mcp NAME`. Use the exact name of an existing `[mcp_servers.NAME]` table. The tool accepts letters A–Z, digits, hyphens and underscores in the name. Use `--enable-mcp NAME` to re-enable the server after fixing it. | Check the corresponding startup error and test workflows that depend on the server. An error disappearing confirms that change alone. |
+| Repeated comparable requests show a long wait, with room to lower reasoning effort | `--reasoning-effort medium` or another level supported by the model. The tool accepts `low`, `medium`, and `high`. | Compare timing and answer quality using the safe workload above. Lowering effort produced mixed timing results in the case study. |
+| Startup logs repeatedly identify one MCP server that the workload can run without | `--disable-mcp NAME`. Use the exact name of an existing `[mcp_servers.NAME]` table. The tool accepts letters A–Z, digits, hyphens and underscores in the name. Use `--enable-mcp NAME` to re-enable the server after fixing it. | Check the corresponding startup error and test dependent workflows in isolation. An error disappearing confirms that change alone. |
 | macOS idle sleep coincides with active work and connection loss | `--prevent-idle-sleep`. The lid can still trigger sleep. | Reopen the desktop app, then check `power.codex_idle_sleep_assertion` in `audit` during an active task and review sleep events afterward. |
 
 If HTTPS probe results are inconclusive, check actual model requests and streaming stability before changing the proxy. The options above edit Codex settings only.
@@ -187,9 +189,9 @@ With the skill installed, you can request the same action in a Codex chat.
 $codex-latency-doctor Preview and apply only the automatic compaction threshold of 120000 in the current Codex home. Verify it and give me the backup ID.
 ```
 
-`verify` runs a strict startup check in a new process with the Codex CLI on `PATH`. After active tasks finish, reopen the desktop app if you use it, repeat the representative workload, and confirm the setting took effect. Use `compare` to check the before and after reports.
+After applying a change, run `verify` once. It runs a strict startup check in a new process with the Codex CLI on `PATH`. For desktop measurements, let active tasks finish, reopen the app if needed, and confirm the setting in the app or in telemetry from a new run before comparing. If verification fails or runtime adoption remains unconfirmed, record the result and stop the comparison.
 
-If verification fails or the change hurts the workload, replace `BACKUP_ID` below with the value from `apply`. Rollback refuses to overwrite the current file if it has changed since that backup. Review both versions locally and merge the intended change in that case.
+If you decide to roll back after failed verification or a regression, replace `BACKUP_ID` below with the confirmed backup ID. It is usually available in the `apply` result. Rollback refuses to overwrite the current file if it has changed since that backup. Review both versions locally and merge the intended change in that case.
 
 ```powershell
 & $doctorPython -m codex_latency_doctor rollback BACKUP_ID
@@ -201,7 +203,27 @@ codex-latency-doctor rollback BACKUP_ID
 codex-latency-doctor verify
 ```
 
-After restoring, reopen the desktop app when active tasks finish and check the affected workflow again.
+After restoring, reopen the desktop app when active tasks finish and check the affected workflow with a read-only or isolated task.
+
+### Recover from an interrupted apply
+
+If `apply` was interrupted before returning its result, run `apply --dry-run` with the original flags and Codex home. If it returns `planned`, review the remaining changes against the original request before any further write. If it returns `unchanged`, the requested values are already on disk. Use `backups` to look for the backup ID.
+
+```powershell
+& $doctorPython -m codex_latency_doctor --json backups
+```
+
+```sh
+codex-latency-doctor --json backups
+```
+
+With the installed skill, you can also ask in a Codex chat.
+
+```text
+$codex-latency-doctor The result of apply --compact-tokens 120000 was lost. Use the same Codex home, check with a dry run, and show matching backup IDs if the setting is already on disk.
+```
+
+Pass the same `--codex-home` before `backups` if you used it for `apply`. The read-only command lists `matching_backup_ids` whose saved digest matches the current config. A match establishes file state only. Confirm the backup belongs to the interrupted operation using an independent record, such as the original command output if available. If there are zero or multiple matches, or the candidate is unconfirmed, leave the rollback pending. Run `rollback` only for a confirmed ID when you intend to restore it.
 
 ## Troubleshooting
 
