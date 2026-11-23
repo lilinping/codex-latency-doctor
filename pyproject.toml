@@ -30,4 +30,4 @@ Releases = "https://github.com/lilinping/codex-latency-doctor/releases"
 version = {attr = "codex_latency_doctor.__version__"}
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["skills/codex-latency-doctor/scripts"]

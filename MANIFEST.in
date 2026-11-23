@@ -1,1 +1,5 @@
 include CASE-STUDY.zh-CN.md
+include README.zh-CN.md
+include skills/codex-latency-doctor/LICENSE
+include skills/codex-latency-doctor/SKILL.md
+include skills/codex-latency-doctor/scripts/doctor.py

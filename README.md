@@ -1,17 +1,35 @@
 # Codex Latency Doctor
 
+[简体中文使用指南](README.zh-CN.md)
+
 A local CLI for diagnosing long pauses in Codex. Compare configuration with observed context usage, match macOS sleep events with model connection errors, and measure HTTPS reachability. This independent project uses the MIT license.
 
 For the original investigation and what each cleanup achieved, see the [Chinese case study](CASE-STUDY.zh-CN.md).
 
+## Install as a Codex skill
+
+Ask Codex to install the skill from the pinned release:
+
+```text
+$skill-installer Install https://github.com/lilinping/codex-latency-doctor/tree/v0.3.0/skills/codex-latency-doctor
+```
+
+After installation, open a new Codex chat and run the skill:
+
+```text
+$codex-latency-doctor Investigate long pauses in Codex over the last 24 hours.
+```
+
+If the skill is missing from the picker, restart Codex. The installed skill bundles the CLI and uses an existing Python 3.11+ interpreter. It runs local diagnostics without pip or a runtime download.
+
 ## Quick start
 
-Requires Python 3.11+ on macOS or Linux. The package has no runtime Python dependencies. Power diagnostics require macOS, `network` uses curl, and `verify` uses Codex on your PATH.
+Requires Python 3.11+ on macOS or Linux. If `python3 --version` is older, use an installed newer interpreter such as `python3.12`. The package has no runtime Python dependencies. Power diagnostics require macOS, `network` uses curl, and `verify` uses Codex on your PATH.
 
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install 'https://github.com/lilinping/codex-latency-doctor/releases/download/v0.2.1/codex_latency_doctor-0.2.1-py3-none-any.whl'
+python -m pip install 'https://github.com/lilinping/codex-latency-doctor/releases/download/v0.3.0/codex_latency_doctor-0.3.0-py3-none-any.whl'
 codex-latency-doctor audit --hours 24
 codex-latency-doctor tasks --scope interactive --limit 5
 ```
@@ -19,7 +37,7 @@ codex-latency-doctor tasks --scope interactive --limit 5
 You can install from a checkout with `python -m pip install .` inside the virtual environment, or run directly from the source directory:
 
 ```sh
-PYTHONPATH=src python3 -m codex_latency_doctor audit --hours 24
+python3 -B skills/codex-latency-doctor/scripts/doctor.py audit --hours 24
 ```
 
 ## Compare chats
@@ -73,5 +91,5 @@ codex exec --ephemeral --skip-git-repo-check --sandbox read-only 'Reply with exa
 ## Test
 
 ```sh
-PYTHONPATH=src python3 -m unittest discover -s tests -v
+PYTHONPATH=skills/codex-latency-doctor/scripts python3 -m unittest discover -s tests -v
 ```

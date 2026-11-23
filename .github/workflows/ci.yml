@@ -30,3 +30,16 @@ jobs:
         run: |
           codex-latency-doctor --version
           python -m unittest discover -s tests -v
+      - name: Run the skill from a standalone installation
+        run: |
+          sandbox="$(mktemp -d)"
+          trap 'rm -rf "$sandbox"' EXIT
+          cp -R skills/codex-latency-doctor "$sandbox/installed skill"
+          cmp LICENSE "$sandbox/installed skill/LICENSE"
+          cd "$sandbox"
+          mkdir codex-home
+          installed_skill="$sandbox/installed skill/scripts/doctor.py"
+          test "$(python -E -S -B "$installed_skill" --version)" = "$(codex-latency-doctor --version)"
+          python -E -S -B "$installed_skill" --codex-home "$sandbox/codex-home" --json audit --hours 1 > skill.json
+          codex-latency-doctor --codex-home "$sandbox/codex-home" --json audit --hours 1 > cli.json
+          python -c 'import json; assert json.load(open("skill.json"))["config"] == json.load(open("cli.json"))["config"]'
