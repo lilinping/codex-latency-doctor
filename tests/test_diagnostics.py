@@ -2,6 +2,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
@@ -18,7 +19,7 @@ class LogTests(unittest.TestCase):
         self.database = self.home / "logs_2.sqlite"
 
     def make_database(self, rows):
-        with sqlite3.connect(self.database) as connection:
+        with closing(sqlite3.connect(self.database)) as connection, connection:
             connection.execute("""
                 CREATE TABLE logs (id INTEGER PRIMARY KEY, ts INTEGER, ts_nanos INTEGER,
                     target TEXT, level TEXT, thread_id TEXT, process_uuid TEXT, feedback_log_body TEXT)
@@ -31,7 +32,7 @@ class LogTests(unittest.TestCase):
             )
 
     def make_state(self, rows):
-        with sqlite3.connect(self.home / "state_5.sqlite") as connection:
+        with closing(sqlite3.connect(self.home / "state_5.sqlite")) as connection, connection:
             connection.execute("""
                 CREATE TABLE threads (id TEXT PRIMARY KEY, source TEXT, thread_source TEXT, title TEXT)
             """)
@@ -113,7 +114,7 @@ class LogTests(unittest.TestCase):
             (20, d.TURN_TARGET, "TRACE", "auto_compact_scope_limit=Some(80000)"),
             (25.5, d.TURN_TARGET, "TRACE", "auto_compact_scope_limit=Some(2)"),
         ])
-        with sqlite3.connect(self.database) as connection:
+        with closing(sqlite3.connect(self.database)) as connection, connection:
             connection.execute("UPDATE logs SET ts_nanos = 'invalid nanos' WHERE ts = 20")
         report, _ = d._read_logs(self.home, 0, 30)
         self.assertEqual(report["status"], "ok")
@@ -124,7 +125,7 @@ class LogTests(unittest.TestCase):
 
     def test_missing_unsupported_and_unreadable_databases(self):
         self.assertEqual(d._read_logs(self.home, 0, 5)[0]["status"], "missing")
-        with sqlite3.connect(self.database) as connection:
+        with closing(sqlite3.connect(self.database)) as connection, connection:
             connection.execute("CREATE TABLE logs (different_version TEXT)")
         self.assertEqual(d._read_logs(self.home, 0, 5)[0]["status"], "unsupported_schema")
         self.database.write_bytes(b"not a database")
@@ -178,7 +179,7 @@ class LogTests(unittest.TestCase):
 
     def test_task_reports_handle_missing_support_and_scan_cap(self):
         self.assertEqual(d.collect_tasks(self.home, 1, 1)["status"], "missing")
-        with sqlite3.connect(self.database) as connection:
+        with closing(sqlite3.connect(self.database)) as connection, connection:
             connection.execute("CREATE TABLE logs (ts INTEGER, level TEXT, target TEXT, feedback_log_body TEXT)")
         self.assertEqual(d.collect_tasks(self.home, 1, 1)["status"], "unsupported_schema")
         self.database.unlink()
