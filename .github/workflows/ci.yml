@@ -1,0 +1,32 @@
+name: Tests
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.11"
+          - os: macos-latest
+            python: "3.14"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Build and install the wheel
+        run: |
+          python -m pip wheel --no-deps . --wheel-dir dist
+          python -m pip install --no-deps dist/*.whl
+      - name: Verify the installed CLI and run tests
+        run: |
+          codex-latency-doctor --version
+          python -m unittest discover -s tests -v

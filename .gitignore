@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+*.sqlite*
+*.jsonl
+*.tgz
+.env*
+latency-doctor-backups/
+.latency-doctor-*
+config.toml
+auth.json
+sessions/
+archived_sessions/
+memories/

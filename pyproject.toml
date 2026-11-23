@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codex-latency-doctor"
+dynamic = ["version"]
+description = "Evidence-first, local diagnostics for Codex latency"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+classifiers = [
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Monitoring",
+]
+dependencies = []
+
+[project.scripts]
+codex-latency-doctor = "codex_latency_doctor.__main__:main"
+
+[project.urls]
+Repository = "https://github.com/lilinping/codex-latency-doctor"
+Issues = "https://github.com/lilinping/codex-latency-doctor/issues"
+Releases = "https://github.com/lilinping/codex-latency-doctor/releases"
+
+[tool.setuptools.dynamic]
+version = {attr = "codex_latency_doctor.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
