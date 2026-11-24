@@ -29,14 +29,14 @@ COMPACTION_END_TARGET = "codex_core::history_item_count"
 RETRY_TARGET = "codex_core::responses_retry"
 HTTP_TARGET = "codex_http_client::client"
 TOOL_TARGET = "codex_core::tools::parallel"
-STREAM_TARGETS = {
-    "codex_api::sse::responses",
-    "codex_api::endpoint::responses_websocket",
-    "codex_core::stream_events_utils",
+STREAM_TRANSPORTS = {
+    "codex_api::sse::responses": "sse",
+    "codex_api::endpoint::responses_websocket": "websocket",
+    "codex_core::stream_events_utils": "other",
 }
 BODY_TARGETS = {
     TURN_TARGET, COMPACTION_START_TARGET, COMPACTION_END_TARGET, RETRY_TARGET,
-    HTTP_TARGET, TOOL_TARGET, "feedback_tags", *STREAM_TARGETS,
+    HTTP_TARGET, TOOL_TARGET, "feedback_tags", *STREAM_TRANSPORTS,
 }
 TASK_TARGETS = {TURN_TARGET, "feedback_tags"}
 TASK_CLASSIFICATIONS = ("interactive", "background", "unknown")
@@ -49,10 +49,17 @@ TURN_MODEL = re.compile(r'\bturn\{(?:[^}]*?\s)?model="?([a-zA-Z0-9_.:/-]{1,128})
 CONTEXT_LIMIT = re.compile(r'\breason="?ContextLimit\b')
 PHASE = re.compile(r'\bphase="?(PreTurn|MidTurn)\b')
 TURN_ID = re.compile(r'\bturn\.id="?([0-9a-f-]{36})\b', re.I)
-MODEL_ROUTE = re.compile(r"/responses(?:/compact)?(?=$|[\s\"',?}])")
+MODEL_ROUTE = re.compile(r"/responses(?P<compact>/compact)?(?=$|[\s\"',?}])")
+COMPACTION_SPAN = re.compile(r"\b(?:run_)?auto_compact\{")
 HTTP_ERROR = re.compile(r"\bstatus=[45][0-9]{2}\b|\brequest failed\b", re.I)
 HTTP_SUCCESS = re.compile(r"\bstatus=2[0-9]{2}\b")
 TOOL_DURATION = re.compile(r"\btotal_duration_ms=([0-9]{1,15}(?:\.[0-9]{1,6})?)\b")
+RETRY_REASONS = {
+    "rate_limit": re.compile(r"\bstatus\s*[:=]\s*429\b|\b429\s+too many requests\b", re.I),
+    "capacity": re.compile(r"\bselected model is at capacity\b", re.I),
+    "stream_transport": re.compile(r"\berror decoding response body\b", re.I),
+    "request_transport": re.compile(r"\berror sending request\b", re.I),
+}
 STREAM_ERROR = re.compile(
     r"stream disconnected|transport error|error (?:reading|processing).*stream|"
     r"stream error|websocket error|error sending request|connection (?:closed|reset)|unexpected eof",
@@ -150,7 +157,10 @@ def _analyze_rows(rows: sqlite3.Cursor, now: float) -> tuple[dict, list[float]]:
     model_wait_samples = []
     tool_samples = []
     model_errors = []
-    retries = http_errors = stream_errors = 0
+    response_http_errors = 0
+    retry_reasons = dict.fromkeys((*RETRY_REASONS, "other"), 0)
+    stream_errors = dict.fromkeys(STREAM_TRANSPORTS.values(), 0)
+    compaction_http = {"success": 0, "errors": 0}
     rows_scanned = 0
     truncated = False
     oldest_row = None
@@ -166,19 +176,34 @@ def _analyze_rows(rows: sqlite3.Cursor, now: float) -> tuple[dict, list[float]]:
         if not body:
             continue
         timestamp = seconds + (nanos or 0) / 1_000_000_000
+        route = MODEL_ROUTE.search(body) if target == HTTP_TARGET else None
+        compaction_span = (
+            target in {HTTP_TARGET, COMPACTION_START_TARGET} and COMPACTION_SPAN.search(body) is not None
+        )
+        compaction_request = route is not None and (
+            route["compact"] is not None
+            or compaction_span and CONTEXT_LIMIT.search(body) is not None and PHASE.search(body) is not None
+        )
+        http_error = route is not None and HTTP_ERROR.search(body) is not None
+        http_success = (
+            route is not None and not http_error
+            and "Request completed" in body and HTTP_SUCCESS.search(body) is not None
+        )
+        if compaction_request and http_success:
+            compaction_http["success"] += 1
+
         if thread and target in {COMPACTION_START_TARGET, HTTP_TARGET}:
             turn = TURN_ID.search(body)
             if turn:
                 key = (thread, process, turn[1])
                 if (
-                    target == HTTP_TARGET and "run_sampling_request{" in body
-                    and "auto_compact{" not in body
-                    and "Request completed" in body and MODEL_ROUTE.search(body) and HTTP_SUCCESS.search(body)
+                    http_success and not compaction_request
+                    and "run_sampling_request{" in body and not compaction_span
                 ):
                     model_headers[key] = timestamp
                 elif (
                     target == COMPACTION_START_TARGET and "building step world state" in body
-                    and "auto_compact{" not in body
+                    and not compaction_span
                 ):
                     headers = model_headers.pop(key, None)
                     if headers is not None and 0 <= headers - timestamp <= MAX_MODEL_WAIT_SECONDS:
@@ -209,11 +234,16 @@ def _analyze_rows(rows: sqlite3.Cursor, now: float) -> tuple[dict, list[float]]:
                         compaction_samples.append(ended - timestamp)
 
         if target == RETRY_TARGET and level in {"WARN", "ERROR"}:
-            retries += 1
-        elif target == HTTP_TARGET and MODEL_ROUTE.search(body) and HTTP_ERROR.search(body):
-            http_errors += 1
-        elif target in STREAM_TARGETS and STREAM_ERROR.search(body):
-            stream_errors += 1
+            # The disconnect wrapper can precede transport or service errors.
+            reason = next((reason for reason, marker in RETRY_REASONS.items() if marker.search(body)), "other")
+            retry_reasons[reason] += 1
+        elif http_error:
+            if compaction_request:
+                compaction_http["errors"] += 1
+            else:
+                response_http_errors += 1
+        elif target in STREAM_TRANSPORTS and STREAM_ERROR.search(body):
+            stream_errors[STREAM_TRANSPORTS[target]] += 1
         else:
             continue
         model_errors.append(timestamp)
@@ -225,6 +255,7 @@ def _analyze_rows(rows: sqlite3.Cursor, now: float) -> tuple[dict, list[float]]:
         "oldest_row_age_seconds": round(max(0, now - oldest_row)) if oldest_row is not None else None,
         "compaction_requests": compactions,
         "compaction_log_elapsed_seconds": _duration_summary(compaction_samples),
+        "compaction_http_response_rows": compaction_http,
         "model_step_to_http_headers_seconds": {
             **_duration_summary(model_wait_samples),
             "at_least_30_seconds": sum(value >= 30 for value in model_wait_samples),
@@ -232,9 +263,12 @@ def _analyze_rows(rows: sqlite3.Cursor, now: float) -> tuple[dict, list[float]]:
         },
         "tool_call_elapsed_ms": _duration_summary(tool_samples),
         "effective_threshold_observations": {str(value): thresholds[value] for value in sorted(thresholds)},
-        "model_retry_rows": retries,
-        "model_http_error_rows": http_errors,
-        "model_stream_error_rows": stream_errors,
+        "model_retry_rows": sum(retry_reasons.values()),
+        "model_retry_rows_by_reason": retry_reasons,
+        "model_http_error_rows": response_http_errors + compaction_http["errors"],
+        "model_response_http_error_rows": response_http_errors,
+        "model_stream_error_rows": sum(stream_errors.values()),
+        "model_stream_error_rows_by_transport": stream_errors,
     }, model_errors[::-1]
 
 

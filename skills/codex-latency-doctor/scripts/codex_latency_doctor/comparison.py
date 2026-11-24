@@ -12,8 +12,12 @@ METRICS = {
     "model_header_at_least_30s": "Paired header waits >= 30s",
     "model_header_at_least_120s": "Paired header waits >= 120s",
     "compaction_requests": "Recorded automatic compaction requests",
+    "mid_turn_compaction_requests": "Recorded mid-turn compaction requests",
     "compaction_median": "Paired compaction median (s)",
+    "compaction_max": "Paired compaction max (s)",
+    "compaction_http_errors": "Compaction HTTP error log rows",
     "model_retries": "Model retry log rows",
+    "stream_transport_retries": "Response transport retry log rows",
     "model_http_errors": "Model HTTP error log rows",
     "model_stream_errors": "Model stream error log rows",
     "tool_median": "Completed tool call median (ms)",
@@ -103,14 +107,19 @@ def _measurements(report: dict, coverage: dict) -> dict:
     header_samples = _count(headers.get("samples"))
     requests = group("compaction_requests")
     phases = [_count(requests.get(phase)) for phase in ("pre_turn", "mid_turn", "other")]
+    compaction_time = group("compaction_log_elapsed_seconds")
     return {
         "model_header_median": duration(headers, "median"),
         "model_header_max": duration(headers, "max"),
         "model_header_at_least_30s": (_count(headers.get("at_least_30_seconds")) if header_samples else None, header_samples),
         "model_header_at_least_120s": (_count(headers.get("at_least_120_seconds")) if header_samples else None, header_samples),
         "compaction_requests": (sum(phases) if None not in phases else None, None),
-        "compaction_median": duration(group("compaction_log_elapsed_seconds"), "median"),
+        "mid_turn_compaction_requests": (_count(requests.get("mid_turn")), None),
+        "compaction_median": duration(compaction_time, "median"),
+        "compaction_max": duration(compaction_time, "max"),
+        "compaction_http_errors": (_count(group("compaction_http_response_rows").get("errors")), None),
         "model_retries": (_count(logs.get("model_retry_rows")), None),
+        "stream_transport_retries": (_count(group("model_retry_rows_by_reason").get("stream_transport")), None),
         "model_http_errors": (_count(logs.get("model_http_error_rows")), None),
         "model_stream_errors": (_count(logs.get("model_stream_error_rows")), None),
         "tool_median": duration(group("tool_call_elapsed_ms"), "median"),

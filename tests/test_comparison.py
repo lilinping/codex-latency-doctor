@@ -81,10 +81,16 @@ class ComparisonTests(unittest.TestCase):
     def test_legacy_snapshots_work_and_task_report_is_rejected(self):
         before, after = self.snapshot(8), self.snapshot(10)
         del before["captured_at_utc"]
+        after["logs"]["model_retry_rows_by_reason"] = {"stream_transport": 2}
+        after["logs"]["compaction_http_response_rows"] = {"errors": 0}
         self.write(before, after)
         report = compare_audits(self.before, self.after)
         self.assertTrue(report["deltas_available"])
         self.assertTrue(report["notes"])
+        self.assertEqual(report["metrics"]["stream_transport_retries"]["after"], 2)
+        self.assertEqual(report["metrics"]["compaction_http_errors"]["after"], 0)
+        self.assertIsNone(report["metrics"]["stream_transport_retries"]["change"])
+        self.assertIsNone(report["metrics"]["compaction_http_errors"]["before"])
 
         self.write({"window_hours": 1, "status": "ok", "tasks": []}, after)
         with redirect_stdout(io.StringIO()) as output:

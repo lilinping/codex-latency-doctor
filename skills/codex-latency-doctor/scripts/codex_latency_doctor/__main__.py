@@ -51,6 +51,8 @@ def _arguments(argv: list[str] | None) -> argparse.Namespace:
     network.add_argument("--service", choices=("chatgpt", "api"), default="chatgpt")
     network.add_argument("--samples", type=_bounded(1, 5), default=3)
     network.add_argument("--compare-direct", action="store_true", help="Also probe with curl's proxy bypassed.")
+    network.add_argument("--compare-macos-proxy", action="store_true",
+                         help="Also probe through the fixed macOS HTTPS proxy, when configured.")
 
     commands.add_parser("verify", help="Check startup with the native Codex CLI on PATH.")
     apply = commands.add_parser("apply", help="Preview or back up and apply selected settings.")
@@ -158,7 +160,10 @@ def main(argv: list[str] | None = None) -> int:
                 if result["status"] != "ok":
                     exit_code = 1
             case "network":
-                result = probe_network(args.service, args.samples, compare_direct=args.compare_direct)
+                result = probe_network(
+                    args.service, args.samples,
+                    compare_direct=args.compare_direct, compare_macos_proxy=args.compare_macos_proxy,
+                )
                 if result["status"] != "ok":
                     exit_code = 1
             case "verify":

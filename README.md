@@ -6,6 +6,8 @@ Diagnose long pauses in Codex with local evidence. Check context compaction, mod
 
 ## Install
 
+The pinned v0.6.0 examples install the stable release. To use the newer reconnect, compaction, and screenshot guidance on `main`, replace `v0.6.0` with `main` in the skill URL, or install the CLI from a checkout of `main` with `python -m pip install .`.
+
 Requires Python 3.11+ on Windows 10/11, macOS, or Linux. Check `py -3 --version` in PowerShell or `python3 --version` on macOS and Linux. If Windows has no `py` launcher, check `python --version` and use `python` in the virtual environment setup below. If you have several versions, you can select one explicitly, for example `py -3.12` or `python3.12`. Open a fresh terminal after installing Python. [Python downloads](https://www.python.org/downloads/)
 
 ### Install as a Codex skill
@@ -60,6 +62,14 @@ From a checkout, you can also install with `python -m pip install .` inside an a
 2. Compare configured and observed compaction thresholds, then check compaction requests and duration, model retries and errors, and completed tool timings. Step-to-HTTP-header timing includes local preparation and possible retries through the first successful response headers. Streaming and unpaired requests need separate evidence. On macOS, check whether connection errors occurred near sleep or wake.
 3. If connectivity is in question, run `network --samples 3 --compare-direct`. The default route uses curl's environment and the direct route bypasses curl's proxy. A system VPN can affect both. An HTTP 401 establishes that the unauthenticated probe received a response. Check model authentication and stream stability independently. If all selected routes fail to get an HTTP response, the command reports `no_http_response` and exits nonzero.
 
+### When Codex shows “Reconnecting 1/5”
+
+Check `model_retry_rows_by_reason` in `audit` near the incident time, alongside SSE and WebSocket error counts. Distinguish send failures and interrupted response streams from capacity and rate limits. A later successful HTTP response in the same turn confirms that headers arrived. Use subsequent chat or tool events to check where the task resumed. If the result of a write is unclear, check the actual state before retrying.
+
+On macOS, `network --samples 3 --compare-direct --compare-macos-proxy` also tests the fixed system HTTPS proxy explicitly. This is a separate route from curl's environment. Automatic proxy configuration, discovery and destination-specific routing need their own check. If sleep or wake coincides with disconnects, check the running app's idle sleep assertion. Use the effective client route and stream evidence to decide whether to change a route.
+
+If a long task overlapped confirmed sleep, run one comparison on AC power with the lid open and `caffeinate -s -t 1800` active. The temporary assertion expires after 30 minutes or when you press Ctrl+C. Check disconnects, compaction time and whether the task resumes from its last completed step.
+
 Every command defaults to the current `CODEX_HOME`, or to `.codex` in your user home. Put global options `--codex-home` and `--json` before the subcommand. Substitute the actual directory in the examples.
 
 ```powershell
@@ -101,6 +111,10 @@ codex-latency-doctor tasks --hours 24 --scope background --limit 10
 Each `task_…` label belongs to one report. Compare similar workloads and carry forward verified decisions with the source artifact or test and the conditions under which you verified it. Context size and compaction evidence cannot identify which memories were used or establish how much faster a chat became.
 
 After context compaction or in a new chat, use the last verified result and continue with the next pending step. Reuse recent evidence while the inputs and target state still match. When following an active task to completion, wait for a state change or new output with a timeout before checking again. During diagnosis, stop when the same state leaves no further check to make.
+
+If the chat returns to an old screenshot or task after compaction, inspect the actions immediately around the reset. Check the latest user instruction, the current turn's last action, and the current project handoff first. Keep the image reference and the verified page, environment and observation. Revisit the visual when there is a new reproduction, a change that affects the conclusion, or an explicit request to inspect it again. Carry browser failures forward and complete pending checks when there is a recovery signal.
+
+For a two-day burst of compaction, set `--hours 48` on both `audit` and `tasks`. Check pre-turn versus mid-turn requests, compact endpoint HTTP outcomes and paired elapsed times separately. A single compaction can produce several HTTP response log rows. A paired duration can include time spent asleep. Check the last completed step against the next meaningful action to detect lost progress. Compare similar long tasks with the same model and context scope before adjusting a threshold.
 
 ## Compare before and after a change
 
@@ -158,7 +172,7 @@ Choose one setting based on the evidence, then save the baseline from the sectio
 
 | Evidence | Change to try | Follow-up check |
 | --- | --- | --- |
-| Frequent costly automatic compactions in comparable chats | `--compact-tokens 120000`. Choose a threshold based on the effective model window and observed context load. The case study confirmed adoption of 120,000. The effect on long-task duration remains unmeasured in a controlled comparison. | Confirm the observed runtime threshold, then compare compaction counts, durations, and task quality. |
+| Frequent costly automatic compactions in comparable chats | Narrow unnecessary tool output first. If compaction remains frequent, choose a threshold based on the model window and observed context load, then test it with `--compact-tokens N`. The commands below use 120,000 as an example. | Confirm the observed threshold in a new task with the same model, then compare mid-turn compaction counts, durations and task quality. |
 | Repeated comparable requests show a long wait, with room to lower reasoning effort | `--reasoning-effort medium` or another level supported by the model. The tool accepts `low`, `medium`, and `high`. | Compare timing and answer quality using the safe workload above. Lowering effort produced mixed timing results in the case study. |
 | Startup logs repeatedly identify one MCP server that the workload can run without | `--disable-mcp NAME`. Use the exact name of an existing `[mcp_servers.NAME]` table. The tool accepts letters A–Z, digits, hyphens and underscores in the name. Use `--enable-mcp NAME` to re-enable the server after fixing it. | Check the corresponding startup error and test dependent workflows in isolation. An error disappearing confirms that change alone. |
 | macOS idle sleep coincides with active work and connection loss | `--prevent-idle-sleep`. The lid can still trigger sleep. | Reopen the desktop app, then check `power.codex_idle_sleep_assertion` in `audit` during an active task and review sleep events afterward. |

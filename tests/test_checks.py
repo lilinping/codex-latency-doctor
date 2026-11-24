@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import tempfile
@@ -9,6 +10,48 @@ from codex_latency_doctor.checks import probe_network, verify_native
 
 
 class NetworkTests(unittest.TestCase):
+    @patch("codex_latency_doctor.checks.sys.platform", "darwin")
+    @patch("codex_latency_doctor.checks.subprocess.run")
+    @patch("codex_latency_doctor.checks.shutil.which", return_value="/usr/bin/curl")
+    def test_fixed_macos_proxy_is_an_independent_sanitized_route(self, _which, run):
+        settings = """<dictionary> {
+  HTTPSEnable : 1
+  HTTPSProxy : private-proxy.example
+  HTTPSPort : 8080
+  __SCOPED__ : <dictionary> {
+    HTTPSProxy : unrelated-proxy.example
+  }
+}
+"""
+        run.side_effect = [
+            subprocess.CompletedProcess([], 0, settings),
+            subprocess.CompletedProcess([], 28, "000 0.0"),
+            subprocess.CompletedProcess([], 28, "000 0.0"),
+            subprocess.CompletedProcess([], 0, "401 0.3"),
+        ]
+        result = probe_network("chatgpt", 1, compare_direct=True, compare_macos_proxy=True)
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["macos_proxy_route"]["http_responses"], 1)
+        self.assertEqual(result["macos_proxy_route"]["probe_status"], "ok")
+        self.assertNotIn("private-proxy", json.dumps(result))
+        self.assertEqual(run.call_args.args[0][-6:-2], [
+            "--proxy", "http://private-proxy.example:8080", "--noproxy", "",
+        ])
+
+    @patch("codex_latency_doctor.checks.sys.platform", "darwin")
+    @patch("codex_latency_doctor.checks.subprocess.run")
+    @patch("codex_latency_doctor.checks.shutil.which", return_value="/usr/bin/curl")
+    def test_automatic_macos_proxy_is_not_evaluated(self, _which, run):
+        run.side_effect = [
+            subprocess.CompletedProcess([], 0, "  ProxyAutoConfigEnable : 1\n  HTTPSEnable : 1\n"),
+            subprocess.CompletedProcess([], 0, "401 0.3"),
+        ]
+        result = probe_network("chatgpt", 1, compare_direct=False, compare_macos_proxy=True)
+        self.assertEqual(result["macos_proxy_route"]["probe_status"], "automatic_proxy_not_tested")
+        self.assertEqual(result["macos_proxy_route"]["samples"], [])
+        self.assertEqual(run.call_count, 2)
+
     @patch("codex_latency_doctor.checks.sys.platform", "linux")
     @patch("codex_latency_doctor.checks.subprocess.run")
     @patch("codex_latency_doctor.checks.shutil.which", return_value="/usr/bin/curl")

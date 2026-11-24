@@ -1,6 +1,6 @@
 ---
 name: codex-latency-doctor
-description: Diagnose Codex 卡顿、长时间无响应 or context compaction with local logs and before/after comparisons. Preview, apply and roll back targeted Codex performance settings, including compaction, reasoning effort, individual MCP registrations and macOS idle sleep.
+description: Diagnose Codex 卡顿、正在重新连接、长时间无响应 or frequent context compaction with local logs and before/after comparisons. Preview, apply and roll back targeted Codex settings, including compaction, reasoning effort, individual MCP registrations and macOS idle sleep.
 license: MIT
 ---
 
@@ -18,12 +18,19 @@ python3 -B "<skill-dir>/scripts/doctor.py" tasks --hours 24 --scope interactive 
 - `audit` reads local configuration, recognized runtime logs and, on macOS, power state. `tasks` compares anonymous context measurements. Use `--scope all` to include unknown sources or `--scope background` to focus on background work.
 - Check log coverage and sample counts. Treat absent observations as unknown. Step-to-HTTP-header timings include local setup and possible retries. Streaming, tool execution and context compaction need their own evidence.
 - For chat comparisons, match source and workload, then compare effective threshold, context window, sampled usage and compaction requests. The telemetry does not identify which previous chats, skills or memories contributed to the prompt.
-- For a connectivity investigation, run `network --samples 3 --compare-direct` through the same launcher. This makes unauthenticated HTTPS requests using curl. A response establishes reachability at the time of the probe. Curl's inherited route can differ from the app's route.
+
+## Reconnecting or compacting repeatedly
+
+- For “Reconnecting 1/5”, note the incident time and match the same turn in the read-only log evidence. Check the retry reasons, HTTP and stream errors, and nearby sleep or wake events. A retry can reflect a broken response stream, a send failure, model capacity or rate limiting. A later HTTP 2xx confirms headers arrived. Check subsequent chat or tool events to establish whether the task resumed.
+- If reachability is in question, run `network --samples 3 --compare-direct` through the same launcher. On macOS, add `--compare-macos-proxy` to test the configured fixed system HTTPS proxy explicitly. The unauthenticated probes measure point-in-time reachability. Use a comparable model turn to check streaming stability. Change a route only if the evidence implicates the app's effective route. When failures coincide with sleep, check the running app's idle sleep assertion and distinguish idle sleep from closing the lid or manual sleep.
+- For frequent compaction, choose `audit --hours 48` and `tasks --hours 48 --scope all` for a two-day incident. Check effective thresholds on the affected chats, then compare pre-turn and mid-turn requests, compact endpoint HTTP outcomes and paired elapsed times. Several response log rows can belong to the same compaction. Compare the last completed step before compaction with the first meaningful step after it to check continuity. Adjust a threshold only with evidence from comparable long tasks on the same model and context scope.
 
 ## Keep progress across turns
 
 - Reuse a recent result while its inputs and the relevant state still match. Wait for a relevant change before requesting the same status again. When asked to monitor through completion, use bounded event waits with the latest cursor when available, or space out status checks. Continue waiting after an unchanged result or timeout. For a one-time diagnosis, report an unchanged or inconclusive state and end the check.
 - After compaction, interruption, or a new chat, carry forward the last verified step, its evidence, and the next unfinished step. For an action with side effects and an unknown outcome, check the resulting state once before deciding whether a retry is safe.
+- If the chat returns to old work after compaction, check the latest user instruction, the current turn's last action and the current project handoff first. Read a narrow slice around the reset to see what changed. Use historical memory for unresolved gaps. A historical request, image or pending check cannot reopen a completed item on its own.
+- Keep an image reference and the verified observation for the affected route, build and viewport. Reuse that observation across turns. Reopen the image when the user asks to inspect it again, a new reproduction appears, or changed inputs make the visual check relevant. Carry over a browser failure until there is a recovery signal, then check the affected path once. A distinct pending acceptance check still needs its own evidence.
 
 ## Apply, verify, and compare
 

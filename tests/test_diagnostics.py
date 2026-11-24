@@ -68,6 +68,45 @@ class LogTests(unittest.TestCase):
         self.assertEqual(errors, [35.0, 40.0, 50.0])
         self.assertNotIn("private-", json.dumps(report))
 
+    def test_transport_and_compaction_http_rows_keep_aggregate_counts(self):
+        self.make_database([
+            (10, d.RETRY_TARGET, "WARN",
+             "stream disconnected before completion: Transport error: error decoding response body; private-detail"),
+            (11, d.RETRY_TARGET, "WARN", "another retry before completion"),
+            (12, d.RETRY_TARGET, "INFO", "stream disconnected before completion: error decoding response body"),
+            (13, "codex_api::sse::responses", "DEBUG", "Error reading SSE, Transport error"),
+            (14, "codex_api::endpoint::responses_websocket", "DEBUG", "connection reset"),
+            (15, "codex_core::stream_events_utils", "DEBUG", "stream error"),
+            (16, d.TOOL_TARGET, "ERROR", "stream disconnected before completion: error decoding response body"),
+            (17, d.HTTP_TARGET, "DEBUG", 'Request completed status=200 url="https://private-host/responses/compact"'),
+            (18, d.HTTP_TARGET, "DEBUG", "Request failed path=/responses/compact status=503"),
+            (19, d.HTTP_TARGET, "DEBUG", "Request failed path=/responses status=503"),
+            (20, d.HTTP_TARGET, "DEBUG", "Request completed path=/responses status=200"),
+            (21, d.HTTP_TARGET, "DEBUG", "Request completed path=/responses/compact-extra status=200"),
+            (22, d.HTTP_TARGET, "DEBUG", "Request started path=/responses/compact status=200"),
+            (23, d.TOOL_TARGET, "DEBUG", "Request completed path=/responses/compact status=200"),
+            (24, d.RETRY_TARGET, "WARN", "stream disconnected before completion: Selected model is at capacity"),
+            (25, d.RETRY_TARGET, "ERROR", "exceeded retry limit, status: 429"),
+            (26, d.RETRY_TARGET, "WARN", "stream connection failed; waiting to retry: error sending request"),
+            (27, d.RETRY_TARGET, "WARN", "stream disconnected before completion: unknown cause"),
+            (28, d.HTTP_TARGET, "DEBUG",
+             "auto_compact{reason=ContextLimit phase=MidTurn} Request completed path=/responses status=200"),
+            (29, d.HTTP_TARGET, "DEBUG",
+             "run_auto_compact{reason=ContextLimit phase=PreTurn} Request failed path=/responses status=503"),
+        ])
+        report, errors = d._read_logs(self.home, 0, 30)
+        self.assertEqual(report["model_retry_rows"], 6)
+        self.assertEqual(report["model_retry_rows_by_reason"], {
+            "rate_limit": 1, "capacity": 1, "stream_transport": 1, "request_transport": 1, "other": 2,
+        })
+        self.assertEqual(report["model_stream_error_rows"], 3)
+        self.assertEqual(report["model_stream_error_rows_by_transport"], {"sse": 1, "websocket": 1, "other": 1})
+        self.assertEqual(report["model_http_error_rows"], 3)
+        self.assertEqual(report["model_response_http_error_rows"], 1)
+        self.assertEqual(report["compaction_http_response_rows"], {"success": 2, "errors": 2})
+        self.assertEqual(errors, [10.0, 11.0, 13.0, 14.0, 15.0, 18.0, 19.0, 24.0, 25.0, 26.0, 27.0, 29.0])
+        self.assertNotIn("private-", json.dumps(report))
+
     def test_reports_truncation_before_target_filtering(self):
         self.make_database([(second, "unrelated", "INFO", "noise") for second in range(1, 5)])
         with patch.object(d, "ROW_LIMIT", 2):
@@ -88,6 +127,11 @@ class LogTests(unittest.TestCase):
             (31, d.HTTP_TARGET, "DEBUG", turn_a + " run_sampling_request{ Request failed path=/responses status=503"),
             (34, d.HTTP_TARGET, "DEBUG",
              turn_a + " run_sampling_request{ run_auto_compact{ Request completed path=/responses/compact status=200"),
+            (35, d.HTTP_TARGET, "DEBUG",
+             turn_a + " run_sampling_request{ Request completed path=/responses/compact status=200"),
+            (36, d.HTTP_TARGET, "DEBUG",
+             turn_a + " run_sampling_request{ auto_compact{reason=ContextLimit phase=MidTurn} "
+             "Request completed path=/responses status=200"),
             (141, d.HTTP_TARGET, "DEBUG", turn_a + " run_sampling_request{ Request completed path=/responses status=200"),
         ])
         report, _ = d._read_logs(self.home, 0, 200)

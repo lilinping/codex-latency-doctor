@@ -1,7 +1,9 @@
 """Run opt-in, bounded network and native CLI checks."""
 
+import ipaddress
 import math
 import os
+import re
 import shutil
 import statistics
 import subprocess
@@ -38,8 +40,46 @@ def _windows_programs(*names: str) -> Iterator[Path]:
                 yield program
 
 
-def _route(curl: str, endpoint: str, *, direct: bool) -> dict:
-    flags = ["--noproxy", "*"] if direct else []
+def _macos_https_proxy() -> tuple[str, str | None]:
+    if sys.platform != "darwin":
+        return "unsupported_platform", None
+    try:
+        result = subprocess.run(
+            ["/usr/sbin/scutil", "--proxy"], capture_output=True,
+            encoding="utf-8", errors="replace", timeout=3, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "proxy_settings_unavailable", None
+    if result.returncode:
+        return "proxy_settings_unavailable", None
+    # Only read top-level settings. Per-interface entries need route-specific resolution.
+    fields = dict(re.findall(r"(?m)^ {2}([A-Za-z]+) : ([^\r\n]+)$", result.stdout))
+    if any(fields.get(key) == "1" for key in ("ProxyAutoConfigEnable", "ProxyAutoDiscoveryEnable")):
+        return "automatic_proxy_not_tested", None
+    if fields.get("HTTPSEnable") != "1":
+        return "no_fixed_https_proxy", None
+    host, port = fields.get("HTTPSProxy", ""), fields.get("HTTPSPort", "")
+    if not re.fullmatch(r"[0-9]{1,5}", port) or not 1 <= int(port) <= 65535:
+        return "invalid_proxy_settings", None
+    if ":" in host:
+        try:
+            address = ipaddress.IPv6Address(host.removeprefix("[").removesuffix("]"))
+        except ipaddress.AddressValueError:
+            return "invalid_proxy_settings", None
+        if address.scope_id is not None:
+            return "invalid_proxy_settings", None
+        host = f"[{address}]"
+    elif not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,252})", host):
+        return "invalid_proxy_settings", None
+    return "ok", f"http://{host}:{port}"
+
+
+def _route(curl: str, endpoint: str, *, direct: bool = False, proxy: str | None = None) -> dict:
+    flags = []
+    if direct:
+        flags = ["--noproxy", "*"]
+    elif proxy is not None:
+        flags = ["--proxy", proxy, "--noproxy", ""]
     command = [
         curl, "--disable", "--silent", "--output", os.devnull,
         "--connect-timeout", "3", "--max-time", "6",
@@ -76,19 +116,25 @@ def _summary(samples: list[dict]) -> dict:
     }
 
 
-def probe_network(service: str, samples: int, *, compare_direct: bool) -> dict:
+def probe_network(service: str, samples: int, *, compare_direct: bool, compare_macos_proxy: bool = False) -> dict:
     executable = next(_windows_programs("curl.exe"), None) if sys.platform == "win32" else shutil.which("curl")
     if not executable:
         return {"status": "curl_unavailable"}
     curl = str(executable)
-    environment_route, direct_route = [], []
+    environment_route, direct_route, macos_route = [], [], []
+    proxy_status, proxy = _macos_https_proxy() if compare_macos_proxy else (None, None)
+    endpoint = ENDPOINTS[service]
     for _ in range(samples):
-        environment_route.append(_route(curl, ENDPOINTS[service], direct=False))
+        environment_route.append(_route(curl, endpoint))
         if compare_direct:
-            direct_route.append(_route(curl, ENDPOINTS[service], direct=True))
+            direct_route.append(_route(curl, endpoint, direct=True))
+        if proxy is not None:
+            macos_route.append(_route(curl, endpoint, proxy=proxy))
     routes = {"environment_route": _summary(environment_route)}
     if compare_direct:
         routes["direct_route"] = _summary(direct_route)
+    if compare_macos_proxy:
+        routes["macos_proxy_route"] = {"probe_status": proxy_status, **_summary(macos_route)}
     reached_http = any(route["http_responses"] for route in routes.values())
     return {"status": "ok" if reached_http else "no_http_response", "service": service, **routes}
 
