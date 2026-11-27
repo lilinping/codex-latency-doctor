@@ -10,6 +10,8 @@ Run the bundled CLI with Python 3.11+ on Windows, macOS or Linux. Resolve `<skil
 
 Choose the starting point that answers the current question. Run subcommands through the bundled `scripts/doctor.py` launcher.
 
+For installation or automatic-update requests, register `lilinping/codex-latency-doctor` with `codex plugin marketplace add lilinping/codex-latency-doctor --ref main`, then run `codex plugin add codex-latency-doctor@lilinping-tools`. Codex refreshes this installation on startup. A copy made by `$skill-installer` stays pinned. When migrating, verify the managed skill is enabled before moving the old copy out of the skills directory.
+
 - For a named slow chat or a recurring review, start with `--json review THREAD_ID`. It returns the latest five closed turns from the local index. Reuse the chat's `next_cursor` as `--after CURSOR` on the next review. Follow `has_more` for the requested interval. An empty successful page completes that check. Open a specific turn only if the counts leave a material question, such as whether a screenshot was regenerated. See [review coverage and examples](references/recovery.md#incremental-chat-review) when needed.
 - For reconnects or a machine-wide delay, `audit --hours 24` checks configuration, recognized runtime logs and, on macOS, power state. For cross-chat context pressure, use `tasks --hours 24 --scope interactive --limit 5`. Select the incident window (1–168 hours). Use `--scope all` to include unknown sources or `--scope background` for background work.
 - Check log coverage and sample counts. Treat absent observations as unknown. Step-to-HTTP-header timings include local setup and possible retries. Streaming, tool execution and context compaction need their own evidence.

@@ -6,27 +6,34 @@ Diagnose long pauses in Codex with local evidence. Check context compaction, mod
 
 ## Install
 
-The pinned v0.6.0 examples install the stable release. To use the newer reconnect, compaction, and screenshot guidance on `main`, replace `v0.6.0` with `main` in the skill URL, or install the CLI from a checkout of `main` with `python -m pip install .`.
+The recommended skill installation follows this repository's `main` branch. The standalone CLI commands below install the published v0.6.0 wheel.
 
 Requires Python 3.11+ on Windows 10/11, macOS, or Linux. Check `py -3 --version` in PowerShell or `python3 --version` on macOS and Linux. If Windows has no `py` launcher, check `python --version` and use `python` in the virtual environment setup below. If you have several versions, you can select one explicitly, for example `py -3.12` or `python3.12`. Open a fresh terminal after installing Python. [Python downloads](https://www.python.org/downloads/)
 
-### Install as a Codex skill
+### Install the skill with automatic updates
 
-In a Codex chat, ask the built-in skill installer to install the pinned version.
+Use a Codex version that supports `codex plugin marketplace` and has access to Git. Run these two commands once in PowerShell, macOS or Linux, or paste them into a Codex chat and ask Codex to run them on your machine.
+
+```sh
+codex plugin marketplace add lilinping/codex-latency-doctor --ref main
+codex plugin add codex-latency-doctor@lilinping-tools
+```
+
+On startup, Codex checks the Git marketplace in the background and refreshes the installed skill. If the source is offline, the cached version remains usable. `codex plugin list --marketplace lilinping-tools --json` shows the installed version. Look for `installed: true`, `enabled: true` and `marketplaceSource.sourceType` set to `git`. To check immediately, run `codex plugin marketplace upgrade lilinping-tools`.
+
+In a new chat, select the skill from the `$` picker or enter its full name. The skill uses your existing Python installation.
+
+```text
+$codex-latency-doctor:codex-latency-doctor Investigate long pauses over the last 24 hours. Use read-only checks and report the log coverage.
+```
+
+**Migrating a previous installation.** `$skill-installer` copies a snapshot, even when its URL contains `main`. Run the two marketplace commands above and verify that the managed skill appears in a new chat. Then move the old `skills/codex-latency-doctor` folder outside the Codex `skills` directory as a backup. The default Codex home is `.codex` under your user home, unless `CODEX_HOME` points elsewhere. Update saved prompts that point directly at the old folder to use the full skill name above.
+
+**Fixed version.** For a deliberate pin or a client without plugin support, use the command below in Codex. This copy stays on v0.6.0 and appears as `$codex-latency-doctor`.
 
 ```text
 $skill-installer Install https://github.com/lilinping/codex-latency-doctor/tree/v0.6.0/skills/codex-latency-doctor
 ```
-
-Open a new chat and invoke the installed skill.
-
-```text
-$codex-latency-doctor Investigate long pauses over the last 24 hours. Use read-only checks and report the log coverage.
-```
-
-The skill bundles the CLI and uses your installed Python with no runtime dependencies. If the skill is missing from the picker, restart Codex after active tasks finish.
-
-To upgrade an existing skill, move the `codex-latency-doctor` folder out of the Codex home's `skills` directory. For example, keep a v0.5.0 copy as `codex-latency-doctor-v0.5.0-backup` directly under the Codex home. Then install v0.6.0 with the command above and open a new chat. The default Codex home is `.codex` under your user home, unless `CODEX_HOME` points elsewhere.
 
 ### Install the CLI in Windows PowerShell
 
@@ -89,7 +96,7 @@ Use `tasks` to inspect the context evidence by chat and source. `audit` aggregat
 If you installed the skill, send this in a Codex chat.
 
 ```text
-$codex-latency-doctor Compare interactive chats and background tasks over the last 24 hours. Include log coverage, sampled context peaks, compaction thresholds, and automatic compaction requests.
+$codex-latency-doctor:codex-latency-doctor Compare interactive chats and background tasks over the last 24 hours. Include log coverage, sampled context peaks, compaction thresholds, and automatic compaction requests.
 ```
 
 ```powershell
@@ -158,7 +165,7 @@ codex-latency-doctor compare before.json after.json
 With both reports saved, you can send the following in a Codex chat. Include the full paths if the reports are in another directory.
 
 ```text
-$codex-latency-doctor Compare before.json and after.json. Check the capture windows, log coverage, and sample counts before explaining which metrics changed.
+$codex-latency-doctor:codex-latency-doctor Compare before.json and after.json. Check the capture windows, log coverage, and sample counts before explaining which metrics changed.
 ```
 
 | What changed | What to check before interpreting it |
@@ -209,7 +216,7 @@ codex-latency-doctor verify
 With the skill installed, you can request the same action in a Codex chat.
 
 ```text
-$codex-latency-doctor Preview and apply only the automatic compaction threshold of 120000 in the current Codex home. Verify it and give me the backup ID.
+$codex-latency-doctor:codex-latency-doctor Preview and apply only the automatic compaction threshold of 120000 in the current Codex home. Verify it and give me the backup ID.
 ```
 
 After applying a change, run `verify` once. It runs a strict startup check in a new process with the Codex CLI on `PATH`. For desktop measurements, let active tasks finish, reopen the app if needed, and confirm the setting in the app or in telemetry from a new run before comparing. If verification fails or runtime adoption remains unconfirmed, record the result and stop the comparison.
@@ -243,7 +250,7 @@ codex-latency-doctor --json backups
 With the installed skill, you can also ask in a Codex chat.
 
 ```text
-$codex-latency-doctor The result of apply --compact-tokens 120000 was lost. Use the same Codex home, check with a dry run, and show matching backup IDs if the setting is already on disk.
+$codex-latency-doctor:codex-latency-doctor The result of apply --compact-tokens 120000 was lost. Use the same Codex home, check with a dry run, and show matching backup IDs if the setting is already on disk.
 ```
 
 Pass the same `--codex-home` before `backups` if you used it for `apply`. The read-only command lists `matching_backup_ids` whose saved digest matches the current config. A match establishes file state only. Confirm the backup belongs to the interrupted operation using an independent record, such as the original command output if available. If there are zero or multiple matches, or the candidate is unconfirmed, leave the rollback pending. Run `rollback` only for a confirmed ID when you intend to restore it.

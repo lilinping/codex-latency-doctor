@@ -6,7 +6,7 @@ Codex 长时间没有可见进度时，用这个本地工具查看上下文压�
 
 ## 安装教程
 
-下方固定版本的命令安装稳定版 v0.6.0。要使用 `main` 上新增的重连诊断、压缩统计和旧截图续跑说明，可把技能安装地址中的 `v0.6.0` 换成 `main`。使用 CLI 时，在 `main` 的仓库目录运行 `python -m pip install .`。
+推荐通过 Codex 插件市场安装技能，自动跟随本仓库的 `main` 分支。单独使用 CLI 时，下方命令安装已发布的 v0.6.0 wheel。
 
 支持 Windows 10/11、macOS 和 Linux。需要 Python 3.11 或以上版本。先核对版本。
 
@@ -15,23 +15,30 @@ Codex 长时间没有可见进度时，用这个本地工具查看上下文压�
 
 如果还没有符合要求的解释器，安装后重新打开终端。[Python 官方下载](https://www.python.org/downloads/)
 
-### 在 Codex 中安装技能
+### 安装默认自动更新的技能
 
-在 Codex 聊天中发送：
+使用支持 `codex plugin marketplace` 的 Codex，并确保可以调用 Git。在 Windows PowerShell、macOS 或 Linux 终端执行以下两行一次。桌面版用户也可以把两行一起发给 Codex，请它在本机执行并验证安装。
+
+```sh
+codex plugin marketplace add lilinping/codex-latency-doctor --ref main
+codex plugin add codex-latency-doctor@lilinping-tools
+```
+
+以后启动 Codex 时，宿主会在后台检查这个 Git 市场并更新已安装的技能。离线时可以继续使用本机缓存。运行 `codex plugin list --marketplace lilinping-tools --json` 可查看版本，确认 `installed` 和 `enabled` 都为 `true`，且 `marketplaceSource.sourceType` 为 `git`。需要立即刷新时运行 `codex plugin marketplace upgrade lilinping-tools`。
+
+新建聊天，输入 `$` 选中技能，也可以直接输入完整名称。诊断程序使用本机已有的 Python。
+
+```text
+$codex-latency-doctor:codex-latency-doctor 只读排查最近 24 小时的卡顿，给出日志覆盖情况、可能卡在哪一步，以及下一项验证。
+```
+
+**从旧版迁移。** `$skill-installer` 安装的是一次性副本，安装地址中写 `main` 也一样。先执行上面的两条市场安装命令，在新聊天确认能选到新版，再把旧的 `skills/codex-latency-doctor` 文件夹移到 Codex 的 `skills` 目录之外作为备份。Codex 默认目录为用户主目录下的 `.codex`，自定义位置以 `CODEX_HOME` 为准。保存过旧目录绝对路径的提示词可改用上面的技能全名。
+
+**固定版本。** 需要固定在 v0.6.0 或使用尚无插件功能的 Codex 时，在聊天里运行下面的指令。此方式保留固定副本，技能名为 `$codex-latency-doctor`。
 
 ```text
 $skill-installer 请从 https://github.com/lilinping/codex-latency-doctor/tree/v0.6.0/skills/codex-latency-doctor 安装技能
 ```
-
-安装后新建聊天并运行：
-
-```text
-$codex-latency-doctor 只读排查最近 24 小时的卡顿，给出日志覆盖情况、可能卡在哪一步，以及下一项验证。
-```
-
-技能已包含诊断程序。安装后使用现有的 Python 运行本地检查，无需 pip。技能列表还未显示此技能时，等活动任务结束后重启 Codex。
-
-如果已安装旧版，把 `codex-latency-doctor` 文件夹移出 Codex 目录下的 `skills` 目录做备份。例如，可以把 v0.5.0 的备份放在 Codex 目录下，命名为 `codex-latency-doctor-v0.5.0-backup`。然后用上面的指令安装 v0.6.0 并新建聊天。默认 Codex 目录是用户主目录下的 `.codex`，自定义位置以 `CODEX_HOME` 为准。
 
 ### Windows PowerShell 安装 CLI
 
@@ -94,7 +101,7 @@ codex-latency-doctor network --samples 3 --compare-direct
 已安装技能时，可以直接在 Codex 聊天中发送这条指令。
 
 ```text
-$codex-latency-doctor 对比最近 24 小时的交互聊天和后台任务。列出各组的日志覆盖、上下文峰值、压缩阈值和自动压缩请求数。
+$codex-latency-doctor:codex-latency-doctor 对比最近 24 小时的交互聊天和后台任务。列出各组的日志覆盖、上下文峰值、压缩阈值和自动压缩请求数。
 ```
 
 ```powershell
@@ -122,7 +129,7 @@ codex-latency-doctor tasks --hours 24 --scope background --limit 10
 在包含 `harness` 的源码或技能版本里，可以让 Codex 在聊天压缩或恢复时收到一条简短提示，直接执行交接中尚未完成的一步。已验收的截图沿用原结论，出现新复现、相关改动或用户要求时再打开。提交结果不明时先查回执。普通工具调用和新聊天启动不执行这个钩子。
 
 ```text
-$codex-latency-doctor 预览并安装恢复提示，检查本机登记情况。
+$codex-latency-doctor:codex-latency-doctor 预览并安装恢复提示，检查本机登记情况。
 ```
 
 CLI 可依次运行 `codex-latency-doctor harness install --dry-run`、`codex-latency-doctor harness install` 和 `codex-latency-doctor harness status`。Windows 使用上文的 `& $doctorPython -m codex_latency_doctor` 加同样的参数。看到 `registered` 表示登记成功。首次使用时，按所在界面审阅这条钩子。
@@ -169,7 +176,7 @@ codex-latency-doctor compare before.json after.json
 如果两份报告已保存，也可以在 Codex 聊天中发送下面的指令。文件位于其他目录时，请写出完整路径。
 
 ```text
-$codex-latency-doctor 比较 before.json 和 after.json。先核对采集窗口、日志覆盖和样本数，再解释有哪些指标变化。
+$codex-latency-doctor:codex-latency-doctor 比较 before.json 和 after.json。先核对采集窗口、日志覆盖和样本数，再解释有哪些指标变化。
 ```
 
 先看两份报告的时间窗口是否等长、扫描是否截断、采集时间是否相隔足够久。差值是当前值减去基线值。工具只在观测窗口和有效数据允许时计算差值。旧版报告如果缺少采集时间，需要自行核对窗口有无重叠。
@@ -222,7 +229,7 @@ codex-latency-doctor verify
 已安装技能时，也可以在 Codex 聊天中直接指明要修改的设置。
 
 ```text
-$codex-latency-doctor 在当前 Codex 目录先预览，再将自动压缩阈值改为 120000。只改这一项，执行校验并告诉我备份 ID。
+$codex-latency-doctor:codex-latency-doctor 在当前 Codex 目录先预览，再将自动压缩阈值改为 120000。只改这一项，执行校验并告诉我备份 ID。
 ```
 
 应用改动后运行一次 `verify`。它用 `PATH` 上的 Codex CLI 启动新进程执行严格配置检查。需要比较桌面应用时，等活动任务完成，必要时重新打开应用，从界面或新任务的运行日志确认改动生效，再做对比。启动校验失败或无法确认运行时已生效时，记录当前结果，停止本次对比。
@@ -256,7 +263,7 @@ codex-latency-doctor --json backups
 已安装技能时，也可以在 Codex 聊天中请求查询。
 
 ```text
-$codex-latency-doctor 上一次 apply --compact-tokens 120000 的结果丢失了。请在同一个 Codex 目录做预览，如果目标设置已经在磁盘上，就列出匹配的备份 ID。
+$codex-latency-doctor:codex-latency-doctor 上一次 apply --compact-tokens 120000 的结果丢失了。请在同一个 Codex 目录做预览，如果目标设置已经在磁盘上，就列出匹配的备份 ID。
 ```
 
 如果 `apply` 指定了 `--codex-home`，在 `backups` 前传入同一个目录。只读命令在 `matching_backup_ids` 中列出保存的摘要与当前配置匹配的备份。匹配只说明文件状态一致。还需根据独立记录确认备份来自这次中断的操作，例如可查到的原命令输出。无匹配、有多个匹配或无法确认来源时，暂缓回滚。确定要恢复时，再对已确认的 ID 执行 `rollback`。

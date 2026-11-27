@@ -116,3 +116,14 @@ jobs:
           if ((Get-FileHash $config).Hash -ne $originalHash) {
             throw 'Rollback did not restore the original config'
           }
+
+          $codexCli = Join-Path $prefix 'codex.cmd'
+          & $codexCli plugin marketplace add $env:GITHUB_WORKSPACE --json | Out-Null
+          $managed = & $codexCli plugin add codex-latency-doctor@lilinping-tools --json | ConvertFrom-Json
+          $managedSkill = Join-Path $managed.installedPath 'codex-latency-doctor'
+          $sourceDoc = Join-Path $env:GITHUB_WORKSPACE 'skills/codex-latency-doctor/SKILL.md'
+          if ((Get-FileHash (Join-Path $managedSkill 'SKILL.md')).Hash -ne (Get-FileHash $sourceDoc).Hash) {
+            throw 'The marketplace installed a different skill'
+          }
+          $managedVersion = python -E -S -B (Join-Path $managedSkill 'scripts/doctor.py') --version
+          if ($managedVersion -ne $skillVersion) { throw 'Managed skill launcher version mismatch' }

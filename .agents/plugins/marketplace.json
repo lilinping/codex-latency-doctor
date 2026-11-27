@@ -1,0 +1,12 @@
+{
+  "name": "lilinping-tools",
+  "plugins": [
+    {
+      "name": "codex-latency-doctor",
+      "source": {
+        "source": "local",
+        "path": "./skills"
+      }
+    }
+  ]
+}
