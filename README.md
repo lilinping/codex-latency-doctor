@@ -112,7 +112,16 @@ Each `task_…` label belongs to one report. Compare similar workloads and carry
 
 After context compaction or in a new chat, use the last verified result and continue with the next pending step. Reuse recent evidence while the inputs and target state still match. When following an active task to completion, wait for a state change or new output with a timeout before checking again. During diagnosis, stop when the same state leaves no further check to make.
 
-If the chat returns to an old screenshot or task after compaction, inspect the actions immediately around the reset. Check the latest user instruction, the current turn's last action, and the current project handoff first. Keep the image reference and the verified page, environment and observation. Revisit the visual when there is a new reproduction, a change that affects the conclusion, or an explicit request to inspect it again. Carry browser failures forward and complete pending checks when there is a recovery signal.
+### Repeated file or image reads after recovery
+
+In a checkout or skill version with the `harness` command, run `codex-latency-doctor harness install --dry-run` to preview a native reminder. Use `harness install` to register it, `harness status` to inspect the registration and `harness remove` to withdraw it. When the host asks for trust, review the entry for `compact|resume` in the interface you use.
+
+- **Codex desktop** — Open **Settings → Hooks**, select **User config** under **From Config**, then expand **SessionStart**. Choose **Trust** on the **Codex Latency Doctor recovery** row. If the list is empty, choose **Reload hooks**.
+- **Codex terminal** — Start `codex`. Choose **Review hooks** at the startup prompt or enter `/hooks` at the Codex input prompt. Select **SessionStart**, press Enter, then select **Codex Latency Doctor recovery**. Press `t` when the detail view shows `t trust`.
+
+The hook prints a fixed instruction on compact or resume. Check the next substantive action against the pending handoff to measure whether it helped. [Design and worked example](skills/codex-latency-doctor/references/recovery.md)
+
+To review a specific chat, copy the ID from its link and run `codex-latency-doctor --json review THREAD_ID`. The first page shows up to five recent closed turns with recorded time and counts of commands, compactions, image views and explicit sleeps. To check whether a turn reopened an old image, inspect the actions around the image call. On subsequent reviews, pass that chat's last `next_cursor` as `--after CURSOR`. While `has_more` is true, fetch the next page with its cursor. A successful empty page means there are no new indexed completions. `current_segment` scopes the result to the active continuation segment. A change of segment invalidates its cursor.
 
 For a two-day burst of compaction, set `--hours 48` on both `audit` and `tasks`. Check pre-turn versus mid-turn requests, compact endpoint HTTP outcomes and paired elapsed times separately. A single compaction can produce several HTTP response log rows. A paired duration can include time spent asleep. Check the last completed step against the next meaningful action to detect lost progress. Compare similar long tasks with the same model and context scope before adjusting a threshold.
 

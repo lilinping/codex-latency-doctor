@@ -11,6 +11,8 @@ from .checks import probe_network, verify_native
 from .comparison import METRICS, ComparisonError, compare_audits
 from .config import REASONING_EFFORTS, ConfigError, change_config, find_matching_backups, inspect_config, restore_config
 from .diagnostics import collect_diagnostics, collect_tasks
+from .harness import recovery_harness
+from .review import review_turns
 
 
 def _bounded(minimum: int, maximum: int):
@@ -46,6 +48,15 @@ def _arguments(argv: list[str] | None) -> argparse.Namespace:
     tasks.add_argument("--limit", type=_bounded(1, 100), default=10, help="Maximum chats to display (default: 10).")
     tasks.add_argument("--scope", choices=("all", "interactive", "background", "unknown"), default="all",
                        help="Filter by chat source. Counts include all observed chats.")
+
+    review = commands.add_parser("review", help="Review recent or newly finished turns of one chat using local metadata.")
+    review.add_argument("thread_id", metavar="THREAD_ID", help="ID from the local Codex chat link.")
+    review.add_argument("--after", metavar="CURSOR", help="Continue after the last reviewed completion in this chat.")
+    review.add_argument("--limit", type=_bounded(1, 25), default=5, help="Maximum turns per page (default: 5).")
+
+    harness = commands.add_parser("harness", help="Manage the native Codex recovery hint for compacted or resumed chats.")
+    harness.add_argument("action", choices=("status", "install", "remove"))
+    harness.add_argument("--dry-run", action="store_true", help="Preview registration changes without writing.")
 
     network = commands.add_parser("network", help="Measure unauthenticated HTTPS reachability.")
     network.add_argument("--service", choices=("chatgpt", "api"), default="chatgpt")
@@ -159,6 +170,12 @@ def main(argv: list[str] | None = None) -> int:
                 result = collect_tasks(codex_home, args.hours, args.limit, scope=args.scope)
                 if result["status"] != "ok":
                     exit_code = 1
+            case "review":
+                result = review_turns(codex_home, args.thread_id, args.after, args.limit)
+                if result["status"] != "ok":
+                    exit_code = 1
+            case "harness":
+                result = recovery_harness(codex_home, args.action, args.dry_run)
             case "network":
                 result = probe_network(
                     args.service, args.samples,

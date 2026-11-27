@@ -1,6 +1,6 @@
 ---
 name: codex-latency-doctor
-description: Diagnose Codex 卡顿、正在重新连接、长时间无响应 or frequent context compaction with local logs and before/after comparisons. Preview, apply and roll back targeted Codex settings, including compaction, reasoning effort, individual MCP registrations and macOS idle sleep.
+description: 排查 Codex 卡顿、重连、压缩后重读文件或旧图、目标反复续跑。按对话增量复盘，核对耗时证据，修复相应配置或恢复执行进度。
 license: MIT
 ---
 
@@ -8,14 +8,10 @@ license: MIT
 
 Run the bundled CLI with Python 3.11+ on Windows, macOS or Linux. Resolve `<skill-dir>` to the directory containing this `SKILL.md` and use its absolute path. Use `py -3 -B` or `python -B` on Windows and `python3 -B` on macOS and Linux. Check the version before starting. The bundled runtime has no Python dependencies.
 
-Start with the commands that match the user's incident. Use the requested time window (1–168 hours) or the default 24 hours.
+Choose the starting point that answers the current question. Run subcommands through the bundled `scripts/doctor.py` launcher.
 
-```sh
-python3 -B "<skill-dir>/scripts/doctor.py" --json audit --hours 24
-python3 -B "<skill-dir>/scripts/doctor.py" tasks --hours 24 --scope interactive --limit 5
-```
-
-- `audit` reads local configuration, recognized runtime logs and, on macOS, power state. `tasks` compares anonymous context measurements. Use `--scope all` to include unknown sources or `--scope background` to focus on background work.
+- For a named slow chat or a recurring review, start with `--json review THREAD_ID`. It returns the latest five closed turns from the local index. Reuse the chat's `next_cursor` as `--after CURSOR` on the next review. Follow `has_more` for the requested interval. An empty successful page completes that check. Open a specific turn only if the counts leave a material question, such as whether a screenshot was regenerated. See [review coverage and examples](references/recovery.md#incremental-chat-review) when needed.
+- For reconnects or a machine-wide delay, `audit --hours 24` checks configuration, recognized runtime logs and, on macOS, power state. For cross-chat context pressure, use `tasks --hours 24 --scope interactive --limit 5`. Select the incident window (1–168 hours). Use `--scope all` to include unknown sources or `--scope background` for background work.
 - Check log coverage and sample counts. Treat absent observations as unknown. Step-to-HTTP-header timings include local setup and possible retries. Streaming, tool execution and context compaction need their own evidence.
 - For chat comparisons, match source and workload, then compare effective threshold, context window, sampled usage and compaction requests. The telemetry does not identify which previous chats, skills or memories contributed to the prompt.
 
@@ -27,10 +23,10 @@ python3 -B "<skill-dir>/scripts/doctor.py" tasks --hours 24 --scope interactive 
 
 ## Keep progress across turns
 
-- Reuse a recent result while its inputs and the relevant state still match. Wait for a relevant change before requesting the same status again. When asked to monitor through completion, use bounded event waits with the latest cursor when available, or space out status checks. Continue waiting after an unchanged result or timeout. For a one-time diagnosis, report an unchanged or inconclusive state and end the check.
-- After compaction, interruption, or a new chat, carry forward the last verified step, its evidence, and the next unfinished step. For an action with side effects and an unknown outcome, check the resulting state once before deciding whether a retry is safe.
-- If the chat returns to old work after compaction, check the latest user instruction, the current turn's last action and the current project handoff first. Read a narrow slice around the reset to see what changed. Use historical memory for unresolved gaps. A historical request, image or pending check cannot reopen a completed item on its own.
-- Keep an image reference and the verified observation for the affected route, build and viewport. Reuse that observation across turns. Reopen the image when the user asks to inspect it again, a new reproduction appears, or changed inputs make the visual check relevant. Carry over a browser failure until there is a recovery signal, then check the affected path once. A distinct pending acceptance check still needs its own evidence.
+- On goal continuation, use the latest user request, the last verified result and the outstanding acceptance condition. Take the action that advances it. Once the requested outcome is verified, deliver it and close the goal when applicable. Another automatic turn alone gives no reason to repeat acceptance.
+- At compaction or resume, keep those facts in the existing handoff. Reuse the skill section, code range or image observation it identifies. Read the missing range if the handoff lacks a fact. A new reproduction, a relevant change or an explicit request warrants reopening the affected image. A regenerated screenshot can contain new evidence at the same path.
+- For a running job the user asked to monitor, use event waits with the latest cursor, or space out checks until completion. If only a person can supply the missing input or operate an account, finish independent work, state the precise action needed and return control. After handoff, check an uncertain submission or download once, then continue from its actual state. A one-time check ends when its result is known.
+- If a chat repeatedly restarts investigation after compaction or resume, use the [recovery harness](references/recovery.md) to preview the native hook, apply it when requested, and verify the first action afterwards. Ordinary latency checks use the commands above.
 
 ## Apply, verify, and compare
 

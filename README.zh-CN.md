@@ -117,7 +117,22 @@ codex-latency-doctor tasks --hours 24 --scope background --limit 10
 
 上下文压缩或换到新聊天后，沿用上一步已核实的产物，从待办步骤继续。输入和目标状态未变时，复用近期的证据。需要跟进运行中的任务直至完成时，先限时等待状态变化或新输出，再查询。排查时若状态相同且已无可推进的检查，就结束本次排查。
 
-如果压缩后又回到旧截图或旧任务，只检查压缩前后的几步。先核对用户最新指令、当前轮最后的动作和项目当前交接。截图保留引用和已确认的页面、环境及结论。有新复现、影响结论的变更，或用户明确要求重新看图时，再检查受影响的画面。浏览器失败沿用已有记录，收到恢复信号后补验仍缺证据的路径。
+### 压缩后总是重读文件或旧图
+
+在包含 `harness` 的源码或技能版本里，可以让 Codex 在聊天压缩或恢复时收到一条简短提示，直接执行交接中尚未完成的一步。已验收的截图沿用原结论，出现新复现、相关改动或用户要求时再打开。提交结果不明时先查回执。普通工具调用和新聊天启动不执行这个钩子。
+
+```text
+$codex-latency-doctor 预览并安装恢复提示，检查本机登记情况。
+```
+
+CLI 可依次运行 `codex-latency-doctor harness install --dry-run`、`codex-latency-doctor harness install` 和 `codex-latency-doctor harness status`。Windows 使用上文的 `& $doctorPython -m codex_latency_doctor` 加同样的参数。看到 `registered` 表示登记成功。首次使用时，按所在界面审阅这条钩子。
+
+- **Codex 桌面版**　打开「设置」→「钩子」，在「来自配置」中选择「用户配置」。展开 `SessionStart`，找到 **Codex Latency Doctor recovery**，核对匹配器为 `compact|resume` 后，点击该条的「信任」。列表为空时可点「重新加载钩子」。
+- **Codex 终端版**　在终端运行 `codex`。启动时若出现 **Hooks need review**，选 **Review hooks**。如果已进入输入框，输入 `/hooks` 并回车。在事件列表选中 `SessionStart` 并回车，再选中 **Codex Latency Doctor recovery**。详情底部显示 `t trust` 时，按 `t` 信任这一条。
+
+卸载用 `harness remove`。实际效果看下次恢复后的第一项工具调用是否推进待办。[设计依据与验收示例](skills/codex-latency-doctor/references/recovery.md)
+
+复盘指定对话时，从对话链接复制 ID，运行 `codex-latency-doctor --json review THREAD_ID`。首次列出最近 5 个已结束轮次的耗时、压缩、命令、看图和显式睡眠次数。下次加 `--after CURSOR`，传入上次该对话返回的 `next_cursor`。有后续页时继续取，成功返回空页表示当前索引没有新增。若返回 `current_segment`，结果只覆盖当前续跑分段。换段导致旧游标失效时会明确报错。首次的 `older_turns_omitted` 表示还有更早轮次。看图次数本身不能证明重复查看了旧图。Windows 使用上文的 `& $doctorPython -m codex_latency_doctor` 加同样参数。
 
 排查两天内的频繁压缩时，把 `audit` 和 `tasks` 的窗口设为 `--hours 48`。分别看开轮前和执行中触发的请求、压缩接口的 HTTP 状态和配对耗时。同一次压缩可能记录多条 HTTP 响应，配对耗时也可能包含休眠。结合压缩前最后一个已完成步骤和压缩后的实际动作判断是否重做或漏掉验收。不同模型或任务的阈值可能不同，调参前先选同模型、同计量范围的长任务做对照。
 
