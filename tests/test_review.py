@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 from codex_latency_doctor.__main__ import main
 from codex_latency_doctor.review import review_turns
@@ -50,9 +51,64 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(first["events"], {"compactions": 1, "commands": 1, "image_views": 2, "sleep_calls": 1})
         self.assertIsNone(last["duration_ms"])
         self.assertIsNone(last["events"])
+        self.assertIsNone(first["memory_reads"])
         cursor = report["next_cursor"]
         unchanged = self.review(cursor)
         self.assertEqual((unchanged["turns"], unchanged["next_cursor"]), ([], cursor))
+
+    def test_index_reads_and_first_two_commands_after_each_compaction(self):
+        self.db.execute("ALTER TABLE thread_items ADD COLUMN item_json TEXT")
+        self.db.execute("ALTER TABLE thread_items ADD COLUMN rollout_ordinal INTEGER")
+        self.turn("private-chat", "turn", 1, 50)
+        target = (self.home / "memories" / "MEMORY.md").as_posix()
+        cwd = (self.home / "project").as_posix()
+        search = {"type": "search", "path": "MEMORY.md", "command": f'rg -n "private-needle" "{target}"'}
+        read = {"type": "read", "path": target}
+        other = {"type": "read", "path": "MEMORY.md"}
+        pattern_only = {"type": "search", "path": "MEMORY.md", "command": f'rg -g "*.md" "{target}" ./docs/MEMORY.md'}
+        mention = {"type": "unknown", "command": f'echo "cat {target}"'}
+        listing = {"type": "search", "path": target, "command": f'rg --files "{target}"'}
+        # None represents compaction, an empty list an ordinary shell action.
+        sequence = [[read, search], None, [other], [search], [read], None, [mention], [pattern_only],
+                    [read], None, None, [], [listing], None, [{"type": "read", "path": "$CODEX_HOME/memories/MEMORY.md"}]]
+        for ordinal, actions in reversed(list(enumerate(sequence))):
+            kind = "contextCompaction" if actions is None else "commandExecution"
+            item = json.dumps({"commandActions": actions, "cwd": cwd, "aggregatedOutput": "private-output"})
+            self.db.execute("INSERT INTO thread_items VALUES ('private-chat','turn',?,?,?)", (kind, item, ordinal))
+        self.db.execute("INSERT INTO thread_items VALUES ('another-chat','turn','commandExecution','invalid',2)")
+        self.db.execute("INSERT INTO thread_items VALUES ('private-chat','turn','imageView','invalid',15)")
+        self.db.commit()
+        report = self.review()
+        self.assertEqual(report["turns"][0]["memory_reads"], {"global_index_commands": 5, "compactions_with_early_index_read": 2})
+        self.assertNotIn("private-", str(report))
+        self.assertNotIn("MEMORY.md", str(report))
+        self.db.execute("UPDATE thread_items SET item_json='broken' WHERE thread_id='private-chat' AND rollout_ordinal=0")
+        self.db.commit()
+        self.assertIsNone(self.review()["turns"][0]["memory_reads"])
+
+    def test_related_uses_exact_directory_and_task_terms_and_never_guesses_a_chat(self):
+        project = self.home / "project A"
+        db = sqlite3.connect(self.home / "state_5.sqlite")
+        self.addCleanup(db.close)
+        db.execute("CREATE TABLE threads(id TEXT, cwd TEXT, title TEXT, name TEXT, first_user_message TEXT)")
+        for tid, cwd, title, name in (
+            ("current", project, "租期 Api_1", None), ("wanted", project, "租期", "API_1"),
+            ("other-task", project, "支付 API_1", None), ("other-project", self.home / "project AB", "租期 API_1", None),
+        ):
+            db.execute("INSERT INTO threads VALUES (?,?,?,?, 'private-body')", (tid, str(cwd), title, name))
+        db.commit()
+
+        def related(*terms):
+            output = io.StringIO()
+            with patch.dict("os.environ", CODEX_THREAD_ID="current"), redirect_stdout(output):
+                self.assertEqual(main(["--codex-home", str(self.home), "--json", "related", "--project", str(project), *terms]), 0)
+            self.assertNotIn("private-body", output.getvalue())
+            return json.loads(output.getvalue())
+
+        self.assertEqual(related("租期", "api_1"), {"status": "ok", "match": "unique", "thread_id": "wanted"})
+        self.assertEqual(related("api_1"), {"status": "ok", "match": "ambiguous"})
+        self.assertEqual(related("private-body"), {"status": "ok", "match": "none"})
+        self.assertEqual(related("api%1"), {"status": "ok", "match": "none"})
 
     def test_cursor_follows_completion_order_with_ties_and_a_late_finishing_turn(self):
         self.turn("private-chat", "active", 1, None, 80)

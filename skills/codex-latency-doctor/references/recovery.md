@@ -24,6 +24,14 @@ Installation appends one `SessionStart` group in the selected Codex home's `hook
 
 ## Check the outcome
 
+For an ordinary task with a known target, such as pushing an already identified commit, use the existing repository and revision. For a complete handoff, perform its pending check. Start an unrelated task with its own project instructions. When an earlier decision is genuinely missing, derive one or two distinctive terms from the current work. A user giving an example of a recurring problem is identifying the class of problem.
+
+```sh
+codex-latency-doctor --json related --project "/path/to/project" calendar inventory
+```
+
+This lookup matches every literal term against local chat titles and names in the exact working directory. It excludes the running chat when Codex supplies its ID. A unique candidate returns its local chat ID. Check the relevant turn against the missing fact before using it. Multiple candidates return `ambiguous`, and zero return `none`. Neither opens history. If a different project owns a known dependency, select that project's directory explicitly. Recovery can reuse an earlier resolved reference.
+
 On a comparable resumed chat, look for the completed recovery hook and the first substantive action. Count an unchanged skill reread or an old image reopened without a new reason separately from a new code range or an affected acceptance check. For a long silent tool batch, distinguish wall time from command runtime before attributing the delay. Registration, delivery of the hint and an actual reduction in repeat work are separate observations.
 
 ## Incremental chat review
@@ -40,6 +48,8 @@ The first call returns the most recent closed turns in completion order. `older_
 The query reads only local index metadata. When the state index points a sidebar chat at a continuation segment, `coverage: current_segment` identifies that scope. Older segments are outside that page. `direct_index` covers the selected ID in the turn index. A segment change invalidates an earlier cursor. `duration_ms` is client-recorded time. Event counts cover compaction, shell commands, image views and explicit sleep items. A null duration or null event summary means the corresponding measurement is missing. A count of image views alone cannot establish that an image was stale. Identify a suspected repeat in that turn only when it affects the conclusion.
 
 `not_indexed`, `missing` and `unsupported_schema` indicate unavailable coverage. `invalid_cursor` means the chat and its previous position could not be matched. Report the gap before taking a fresh sample. A new baseline can omit intervening completions. The tool keeps no cursor file and reads no transcript or project media.
+
+Under `memory_reads`, `global_index_commands` counts recorded shell executions with a recognized read or search of the selected Codex home's `memories/MEMORY.md`. Several matching actions in one execution count once. `compactions_with_early_index_read` counts recoveries with a match in the next two recorded shell executions, ending at the next compaction or the end of the turn. It counts each recovery once. The tool examines indexed action arguments in the selected turns and returns counts. A project-local namesake, text that mentions the path, arbitrary scripts and automatic prompt injection fall outside this measurement. Missing action metadata yields `null`. Missing or tied ordering can make the recovery count unavailable. Check whether a read answered a missing question before calling it wasted work.
 
 ## Design sources
 

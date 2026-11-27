@@ -112,10 +112,12 @@ def inspect_config(codex_home: Path) -> dict:
         return {"status": "unreadable"}
 
     desktop = _table(config, "desktop")
+    use_memories = _table(config, "memories").get("use_memories")
     providers = _table(config, "model_providers")
     provider = config.get("model_provider")
     return {
         "status": "ok",
+        "use_memories": use_memories if type(use_memories) is bool else None,
         "compact_tokens": config.get(COMPACT) if type(config.get(COMPACT)) is int else None,
         "prevent_idle_sleep": desktop.get(SLEEP) if type(desktop.get(SLEEP)) is bool else None,
         "external_import_enabled": (
@@ -161,6 +163,7 @@ def _edited(
     reasoning_effort: str | None,
     mcp_name: str | None,
     mcp_enabled: bool | None,
+    use_memories: bool | None,
 ) -> tuple[bytes, dict]:
     expected = _parse(original)
     text = original.decode("utf-8")
@@ -179,15 +182,21 @@ def _edited(
             expected[key] = after
             changes[key] = {"before": before, "after": after}
 
-    desktop = _table(expected, "desktop")
-    sleep_before = desktop.get(SLEEP)
-    if prevent_idle_sleep and sleep_before is not True:
-        if "desktop" not in expected:
-            text += (newline if text.endswith("\n") else newline * 2) + f"[desktop]{newline}{SLEEP} = true{newline}"
+    for table, key, after in (
+        ("desktop", SLEEP, True if prevent_idle_sleep else None),
+        ("memories", "use_memories", use_memories),
+    ):
+        section = _table(expected, table)
+        before = section.get(key)
+        if after is None or before is after:
+            continue
+        literal = json.dumps(after)
+        if table not in expected:
+            text += (newline if text.endswith("\n") else newline * 2) + f"[{table}]{newline}{key} = {literal}{newline}"
         else:
-            text = _set_table_scalar(text, "desktop", SLEEP, "true", SLEEP in desktop, newline)
-        expected.setdefault("desktop", {})[SLEEP] = True
-        changes[f"desktop.{SLEEP}"] = {"before": sleep_before if type(sleep_before) is bool else None, "after": True}
+            text = _set_table_scalar(text, table, key, literal, key in section, newline)
+        expected.setdefault(table, {})[key] = after
+        changes[f"{table}.{key}"] = {"before": before if type(before) is bool else None, "after": after}
 
     if mcp_name is not None:
         server = _table(expected, "mcp_servers").get(mcp_name)
@@ -418,6 +427,7 @@ def change_config(
     reasoning_effort: str | None = None,
     mcp_name: str | None = None,
     mcp_enabled: bool | None = None,
+    use_memories: bool | None = None,
 ) -> dict:
     if compact_tokens is not None and (type(compact_tokens) is not int or not 1 <= compact_tokens <= 2**31 - 1):
         raise ConfigError("The compact token threshold must be a positive integer up to 2147483647.")
@@ -426,11 +436,13 @@ def change_config(
     if mcp_name is not None or mcp_enabled is not None:
         if not isinstance(mcp_name, str) or not MCP_NAME_PATTERN.fullmatch(mcp_name) or type(mcp_enabled) is not bool:
             raise ConfigError("Select an MCP server name with ASCII letters, digits, hyphens, or underscores.")
-    if compact_tokens is None and not prevent_idle_sleep and reasoning_effort is None and mcp_name is None:
+    if use_memories is not None and type(use_memories) is not bool:
+        raise ConfigError("Select on or off for automatic memory use.")
+    if compact_tokens is None and not prevent_idle_sleep and reasoning_effort is None and mcp_name is None and use_memories is None:
         raise ConfigError("Select at least one setting to change.")
     path = codex_home / "config.toml"
     original = _read(path)
-    updated, changes = _edited(original, compact_tokens, prevent_idle_sleep, reasoning_effort, mcp_name, mcp_enabled)
+    updated, changes = _edited(original, compact_tokens, prevent_idle_sleep, reasoning_effort, mcp_name, mcp_enabled, use_memories)
     if original == updated:
         return {"status": "unchanged"}
     if dry_run:

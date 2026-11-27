@@ -12,7 +12,7 @@ from .comparison import METRICS, ComparisonError, compare_audits
 from .config import REASONING_EFFORTS, ConfigError, change_config, find_matching_backups, inspect_config, restore_config
 from .diagnostics import collect_diagnostics, collect_tasks
 from .harness import recovery_harness
-from .review import review_turns
+from .review import related_thread, review_turns
 
 
 def _bounded(minimum: int, maximum: int):
@@ -54,6 +54,10 @@ def _arguments(argv: list[str] | None) -> argparse.Namespace:
     review.add_argument("--after", metavar="CURSOR", help="Continue after the last reviewed completion in this chat.")
     review.add_argument("--limit", type=_bounded(1, 25), default=5, help="Maximum turns per page (default: 5).")
 
+    related = commands.add_parser("related", help="Locate a prior chat in one working directory by literal task terms.")
+    related.add_argument("--project", type=Path, default=Path.cwd(), help="Exact chat working directory (default: current directory).")
+    related.add_argument("terms", metavar="TERM", nargs="+", help="One to six distinctive terms for the missing task fact.")
+
     harness = commands.add_parser("harness", help="Manage the native Codex recovery hint for compacted or resumed chats.")
     harness.add_argument("action", choices=("status", "install", "remove"))
     harness.add_argument("--dry-run", action="store_true", help="Preview registration changes without writing.")
@@ -71,6 +75,7 @@ def _arguments(argv: list[str] | None) -> argparse.Namespace:
     apply.add_argument("--compact-tokens", type=_bounded(1, 2**31 - 1), help="Set the automatic compaction threshold.")
     apply.add_argument("--reasoning-effort", choices=REASONING_EFFORTS, help="Set the default model reasoning effort.")
     apply.add_argument("--prevent-idle-sleep", action="store_true", help="Enable the macOS desktop idle sleep setting.")
+    apply.add_argument("--use-memories", choices=("on", "off"), help="Set automatic use of shared Codex memories in new chats.")
     mcp = apply.add_mutually_exclusive_group()
     mcp.add_argument("--disable-mcp", metavar="NAME", help="Disable an existing MCP registration.")
     mcp.add_argument("--enable-mcp", metavar="NAME", help="Re-enable an existing MCP registration.")
@@ -174,6 +179,10 @@ def main(argv: list[str] | None = None) -> int:
                 result = review_turns(codex_home, args.thread_id, args.after, args.limit)
                 if result["status"] != "ok":
                     exit_code = 1
+            case "related":
+                result = related_thread(codex_home, args.project, args.terms, os.environ.get("CODEX_THREAD_ID"))
+                if result["status"] != "ok":
+                    exit_code = 1
             case "harness":
                 result = recovery_harness(codex_home, args.action, args.dry_run)
             case "network":
@@ -197,6 +206,7 @@ def main(argv: list[str] | None = None) -> int:
                     prevent_idle_sleep=args.prevent_idle_sleep,
                     dry_run=args.dry_run,
                     reasoning_effort=args.reasoning_effort,
+                    use_memories=None if args.use_memories is None else args.use_memories == "on",
                     mcp_name=mcp_name,
                     mcp_enabled=None if mcp_name is None else args.enable_mcp is not None,
                 )

@@ -1,6 +1,6 @@
 {
   "name": "codex-latency-doctor",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Diagnose Codex latency, reconnects and repeated work using local evidence.",
   "skills": "./codex-latency-doctor",
   "interface": {

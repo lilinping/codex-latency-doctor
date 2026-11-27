@@ -55,6 +55,28 @@ class ConfigTests(unittest.TestCase):
         if os.name == "nt":
             self.assertEqual(config._windows_acl_text(config._windows_acl(self.path)), original_acl)
 
+    def test_memory_use_changes_only_injection_with_preview_and_rollback(self):
+        original = (b"[features]\r\nmemories = true\r\n[memories]\r\ngenerate_memories = true\r\n"
+                    b"use_memories = true # local policy\r\ndisable_on_external_context = false\r\n")
+        (self.home / "config.toml").write_bytes(original)
+        preview = change_config(self.home, use_memories=False, dry_run=True)
+        self.assertEqual(preview, {"status": "planned", "changes": {"memories.use_memories": {"before": True, "after": False}}})
+        self.assertFalse((self.home / BACKUPS).exists())
+        change = change_config(self.home, use_memories=False)
+        self.assertEqual((self.home / "config.toml").read_bytes(), original.replace(b"use_memories = true", b"use_memories = false"))
+        self.assertIs(inspect_config(self.home)["use_memories"], False)
+        self.assertEqual(change_config(self.home, use_memories=False), {"status": "unchanged"})
+        restore_config(self.home, change["backup_id"])
+        self.assertEqual((self.home / "config.toml").read_bytes(), original)
+
+    def test_add_and_reenable_memory_use_without_creating_generation_settings(self):
+        for original in (b"# previous setup\n", b"[memories]"):
+            with self.subTest(original=original):
+                (self.home / "config.toml").write_bytes(original)
+                change_config(self.home, use_memories=False)
+                change_config(self.home, use_memories=True)
+                self.assertEqual(tomllib.loads((self.home / "config.toml").read_text())["memories"], {"use_memories": True})
+
     def test_concurrent_write_is_refused(self):
         self.path.write_bytes(b"")
         with config._locked(self.home, create=True):

@@ -126,6 +126,20 @@ codex-latency-doctor tasks --hours 24 --scope background --limit 10
 
 ### 压缩后总是重读文件或旧图
 
+**市场技能和捆绑 CLI 从 0.8.0 起支持按任务取用记忆。** 有当前对话、交接和项目证据就直接执行。确实缺一项历史决定时，可以用项目目录和任务关键词找到候选对话，用户无需提供旧对话名称或链接。用户举例描述一类问题时，按这类行为定位原因。已经验过的文件和截图可以沿用原结论。
+
+```sh
+codex-latency-doctor --json related --project "/项目工作目录" 租期 库存
+codex-latency-doctor apply --use-memories off --dry-run
+codex-latency-doctor apply --use-memories off
+```
+
+通过市场安装时，macOS/Linux 用 `python3 -B "<技能目录>/scripts/doctor.py"`，Windows 用 `py -3 -B "<技能目录>/scripts/doctor.py"`，后接示例中的参数。`related` 只匹配该工作目录里的对话标题和名称，要求包含所有关键词。唯一命中才返回对话 ID，再核对与缺失事实有关的轮次。多个命中时可用已知线索缩小范围，无命中就结束这次检索。交接已够用就跳过此命令。
+
+配置命令可关闭选定 Codex 目录中新对话自动载入共享记忆的行为。已有聊天、生成记忆和定向查证都保留。应用后运行 `verify`，再看新对话的初始上下文。已有聊天可能仍含旧内容。用返回的备份 ID 执行 `rollback` 可恢复原配置。安装或更新技能本身不会改这项设置。需要其他技能也按此方式执行时，可在用户级 `AGENTS.md` 写入“先用本轮目标、当前交接和项目证据；仅在缺少影响下一步的历史事实时，按项目和任务线索定位对应轮次”。
+
+用 `review THREAD_ID` 可以核查实际行为。`memory_reads.global_index_commands` 是本轮可识别的全局索引读取命令数，`compactions_with_early_index_read` 是恢复后前两条 Shell 命令内读取它的压缩次数。只在文字里提到路径、读取项目自己的同名文件均排除。索引字段不足时显示 `null`。
+
 在包含 `harness` 的源码或技能版本里，可以让 Codex 在聊天压缩或恢复时收到一条简短提示，直接执行交接中尚未完成的一步。已验收的截图沿用原结论，出现新复现、相关改动或用户要求时再打开。提交结果不明时先查回执。普通工具调用和新聊天启动不执行这个钩子。
 
 ```text

@@ -121,6 +121,20 @@ After context compaction or in a new chat, use the last verified result and cont
 
 ### Repeated file or image reads after recovery
 
+The marketplace skill and bundled CLI from **0.8.0** can scope memory use across tasks. Use the current chat, handoff and project files first. If a prior decision affects the next step, the agent can locate a candidate by project and a few distinctive words, even if the user has no chat name or link. An example of a recurring failure helps identify the behavior to fix across tasks.
+
+```sh
+codex-latency-doctor --json related --project "/path/to/project" calendar inventory
+codex-latency-doctor apply --use-memories off --dry-run
+codex-latency-doctor apply --use-memories off
+```
+
+For a marketplace installation, run these arguments after `python3 -B "<skill-dir>/scripts/doctor.py"` on macOS/Linux or `py -3 -B "<skill-dir>/scripts/doctor.py"` on Windows. `related` checks chat titles and names in the exact working directory. It returns an ID only on a unique match. Refine an ambiguous match before reading a turn. An empty result ends that lookup. Skip this command entirely when the handoff already gives the answer.
+
+The optional config change controls automatic shared memory use for fresh chats in the selected Codex home. It preserves memory generation and saved chats. Run `verify` and check a new chat's initial context. Existing chats may still contain earlier material. Use the returned backup ID with `rollback` to restore the previous config. Installing or updating the plugin does not apply this setting. For the same behavior across skills, include the current-task-first rule in your user-level `AGENTS.md`.
+
+In `review THREAD_ID`, `memory_reads.global_index_commands` counts recognized shell reads of the shared index. `compactions_with_early_index_read` counts recoveries that access it within the next two shell executions. A null measurement indicates missing evidence. Ordinary mentions and project-local files named `MEMORY.md` are excluded.
+
 In a checkout or skill version with the `harness` command, run `codex-latency-doctor harness install --dry-run` to preview a native reminder. Use `harness install` to register it, `harness status` to inspect the registration and `harness remove` to withdraw it. When the host asks for trust, review the entry for `compact|resume` in the interface you use.
 
 - **Codex desktop** — Open **Settings → Hooks**, select **User config** under **From Config**, then expand **SessionStart**. Choose **Trust** on the **Codex Latency Doctor recovery** row. If the list is empty, choose **Reload hooks**.
